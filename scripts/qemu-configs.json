@@ -1,0 +1,40 @@
+{
+  "configurations": {
+    "default": {
+      "name": "Default QEMU Run",
+      "memory": "512M",
+      "display": "gtk",
+      "serial": "stdio",
+      "network": "none",
+      "kvm": true
+    },
+    "debug": {
+      "name": "Debug Mode",
+      "memory": "512M",
+      "display": "none",
+      "serial": "stdio",
+      "network": "none",
+      "kvm": false,
+      "gdb": true,
+      "gdb_port": 1234
+    },
+    "test": {
+      "name": "Automated Testing",
+      "memory": "256M",
+      "display": "none",
+      "serial": "file:test_output.log",
+      "network": "none",
+      "kvm": true,
+      "timeout": 30
+    },
+    "development": {
+      "name": "Development Mode",
+      "memory": "1G",
+      "display": "gtk",
+      "serial": "stdio",
+      "network": "user",
+      "kvm": true,
+      "usb": true
+    }
+  }
+}
