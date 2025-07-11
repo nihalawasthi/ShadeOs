@@ -5,6 +5,7 @@
 #include "heap.h"
 #include "timer.h"
 #include "keyboard.h"
+#include "serial.h"
 
 void kernel_main(uint64_t mb2_info_ptr) {
     // First thing - write directly to VGA to test if we even get here
@@ -75,6 +76,11 @@ void kernel_main(uint64_t mb2_info_ptr) {
     // Initialize keyboard
     keyboard_init();
     vga_print("[BOOT] Keyboard driver initialized\n");
+
+    // Initialize serial port
+    serial_init();
+    vga_print("[BOOT] Serial port (COM1) initialized\n");
+    serial_write("[BOOT] ShadeOS serial port initialized\n");
 
     vga_print("[BOOT] Initializing GDT...\n");
     gdt_init();
