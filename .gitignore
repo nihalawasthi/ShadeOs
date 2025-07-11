@@ -37,4 +37,5 @@
 /scripts/*.log
 /scripts/*.tmp
 /*.pem
+/cmds
 ShadeOs.pem

@@ -16,17 +16,17 @@ case "$MODE" in
     kernel)
         echo "🧪 Testing Kernel (direct boot)"
         echo "=============================="
-        if [[ ! -f kernel.bin ]]; then
-            echo "❌ No kernel binary found"
-            exit 1
-        fi
+if [[ ! -f kernel.bin ]]; then
+    echo "❌ No kernel binary found"
+    exit 1
+fi
         echo "Running QEMU with kernel.bin..."
         qemu-system-x86_64 \
             -kernel kernel.bin \
-            -m 512M \
+        -m 512M \
             -serial stdio \
-            -display none \
-            -no-reboot \
+        -display none \
+        -no-reboot \
             -no-shutdown &
         QEMU_PID=$!
         echo "QEMU started (PID: $QEMU_PID)"

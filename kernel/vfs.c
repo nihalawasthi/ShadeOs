@@ -2,6 +2,7 @@
 #include "heap.h"
 #include "kernel.h"
 #include "string.h"
+#include "fat.h"
 
 static vfs_node_t nodes[MAX_FILES];
 static vfs_node_t* root = 0;
@@ -38,6 +39,22 @@ vfs_node_t* vfs_create(const char* name, int type, vfs_node_t* parent) {
             nodes[i].sibling = NULL;
             for (int j = 0; j < MAX_FILE_NAME; j++) nodes[i].name[j] = 0;
             for (int j = 0; name[j] && j < MAX_FILE_NAME-1; j++) nodes[i].name[j] = name[j];
+            nodes[i].fat_filename[0] = 0;
+            // FAT16 support: if creating in root, also create in FAT
+            if (parent == root && type == VFS_TYPE_MEM) {
+                if (fat_create(name) == 0) {
+                    nodes[i].type = VFS_TYPE_FAT;
+                    // Store 8.3 name for FAT
+                    int n = 0, k = 0;
+                    while (name[k] && name[k] != '.' && n < 8) nodes[i].fat_filename[n++] = (name[k] >= 'a' && name[k] <= 'z') ? name[k]-32 : name[k++];
+                    while (n < 8) nodes[i].fat_filename[n++] = ' ';
+                    if (name[k] == '.') k++;
+                    int e = 0;
+                    while (name[k] && e < 3) nodes[i].fat_filename[8+e++] = (name[k] >= 'a' && name[k] <= 'z') ? name[k]-32 : name[k++];
+                    while (e < 3) nodes[i].fat_filename[8+e++] = ' ';
+                    nodes[i].fat_filename[11] = 0;
+                }
+            }
             // Insert as child of parent
             if (parent) {
                 if (!parent->child) parent->child = &nodes[i];
@@ -86,22 +103,34 @@ void vfs_list(vfs_node_t* dir) {
 }
 
 int vfs_read(vfs_node_t* node, void* buf, int size) {
-    if (!node || node->type != VFS_TYPE_MEM) return -1;
-    int to_read = size;
-    if (node->pos + to_read > node->size) to_read = node->size - node->pos;
-    if (to_read <= 0) return 0;
-    memcpy(buf, (uint8_t*)node->data + node->pos, to_read);
-    node->pos += to_read;
-    return to_read;
+    if (!node) return -1;
+    if (node->type == VFS_TYPE_MEM) {
+        int to_read = size;
+        if (node->pos + to_read > node->size) to_read = node->size - node->pos;
+        if (to_read <= 0) return 0;
+        memcpy(buf, (uint8_t*)node->data + node->pos, to_read);
+        node->pos += to_read;
+        return to_read;
+    } else if (node->type == VFS_TYPE_FAT) {
+        // Use fat_read
+        return fat_read(node->name, buf, size);
+    }
+    return -1;
 }
 
 int vfs_write(vfs_node_t* node, const void* buf, int size) {
-    if (!node || node->type != VFS_TYPE_MEM) return -1;
-    int to_write = size;
-    if (node->pos + to_write > MAX_FILE_SIZE) to_write = MAX_FILE_SIZE - node->pos;
-    if (to_write <= 0) return 0;
-    memcpy((uint8_t*)node->data + node->pos, buf, to_write);
-    node->pos += to_write;
-    if (node->pos > node->size) node->size = node->pos;
-    return to_write;
+    if (!node) return -1;
+    if (node->type == VFS_TYPE_MEM) {
+        int to_write = size;
+        if (node->pos + to_write > MAX_FILE_SIZE) to_write = MAX_FILE_SIZE - node->pos;
+        if (to_write <= 0) return 0;
+        memcpy((uint8_t*)node->data + node->pos, buf, to_write);
+        node->pos += to_write;
+        if (node->pos > node->size) node->size = node->pos;
+        return to_write;
+    } else if (node->type == VFS_TYPE_FAT) {
+        // Use fat_write
+        return fat_write(node->name, buf, size);
+    }
+    return -1;
 } 

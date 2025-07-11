@@ -10,6 +10,7 @@
 // File types
 #define VFS_TYPE_MEM 1
 #define VFS_TYPE_DIR 2
+#define VFS_TYPE_FAT 3 // FAT16-backed file
 
 // File/directory node
 typedef struct vfs_node {
@@ -22,6 +23,7 @@ typedef struct vfs_node {
     struct vfs_node* parent;
     struct vfs_node* child;
     struct vfs_node* sibling;
+    char fat_filename[12]; // 8.3 name for FAT files, null-terminated
 } vfs_node_t;
 
 void vfs_init();
