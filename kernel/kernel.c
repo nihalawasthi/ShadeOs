@@ -6,6 +6,7 @@
 #include "timer.h"
 #include "keyboard.h"
 #include "serial.h"
+#include "vfs.h"
 
 void kernel_main(uint64_t mb2_info_ptr) {
     // First thing - write directly to VGA to test if we even get here
@@ -81,6 +82,22 @@ void kernel_main(uint64_t mb2_info_ptr) {
     serial_init();
     vga_print("[BOOT] Serial port (COM1) initialized\n");
     serial_write("[BOOT] ShadeOS serial port initialized\n");
+
+    // Initialize VFS
+    vfs_init();
+    vga_print("[BOOT] VFS (in-memory) initialized\n");
+    int fd = vfs_create("demo.txt", VFS_TYPE_MEM);
+    if (fd >= 0) {
+        vfs_write(fd, "Hello, VFS!\n", 12);
+        vfs_close(fd);
+        fd = vfs_open("demo.txt");
+        char buf[32] = {0};
+        int n = vfs_read(fd, buf, 31);
+        vga_print("[VFS] Read from demo.txt: ");
+        vga_print(buf);
+        vga_print("\n");
+        vfs_close(fd);
+    }
 
     vga_print("[BOOT] Initializing GDT...\n");
     gdt_init();
