@@ -43,4 +43,9 @@ void outb(uint16_t port, uint8_t data);
 uint16_t inw(uint16_t port);
 void outw(uint16_t port, uint16_t data);
 
+// Multiboot2 memory map parsing
+void parse_multiboot2_memory_map(uint64_t mb2_info_ptr);
+
+void kernel_main(uint64_t mb2_info_ptr);
+
 #endif

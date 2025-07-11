@@ -178,8 +178,8 @@ long_mode_start:
     mov rdi, 0xB8000
     call print_string_64
 
-    ; Call kernel - THIS IS THE KEY FIX
-    ; Now we're in 64-bit mode and can call 64-bit C code
+    ; Pass Multiboot2 info pointer to kernel_main in rdi
+    mov rdi, [esp]    ; esp still points to the last value pushed in 32-bit mode (multiboot info pointer)
     call kernel_main
 
     ; Halt if kernel returns
