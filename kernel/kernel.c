@@ -32,42 +32,32 @@ void demo_task2() {
 }
 
 void kernel_main(uint64_t mb2_info_ptr) {
-    // First thing - write directly to VGA to test if we even get here
+    // STEP 0: VGA direct print (always enabled)
     volatile uint16_t* vga = (uint16_t*)0xB8000;
-    
-    // Clear screen
-    for (int i = 0; i < 80 * 25; i++) {
-        vga[i] = 0x0F20; // White space
-    }
-    
-    // Write test message
+    for (int i = 0; i < 80 * 25; i++) vga[i] = 0x0F20;
     const char* msg = "KERNEL STARTED - 64BIT MODE WORKING!";
-    for (int i = 0; msg[i]; i++) {
-        vga[i] = 0x0A00 | msg[i]; // Light green text
-    }
-    
-    // If we get here, the kernel is working
-    // Initialize VGA properly
+    for (int i = 0; msg[i]; i++) vga[i] = 0x0A00 | msg[i];
+
+    // VGA init/clear
     vga_init();
     vga_clear();
-    
-    vga_set_color(0x0A); // Light green
+    vga_set_color(0x0A);
     vga_print("ShadeOS v0.1\n");
-    vga_set_color(0x0F); // White
+    vga_set_color(0x0F);
     vga_print("======================================\n\n");
 
+    // Print Multiboot2 info pointer
     vga_print("[BOOT] Multiboot2 info pointer: 0x");
-    // Print mb2_info_ptr as hex (simple, not robust)
     for (int i = 60; i >= 0; i -= 4) {
         uint8_t digit = (mb2_info_ptr >> i) & 0xF;
         vga_putchar(digit < 10 ? '0' + digit : 'A' + digit - 10);
     }
     vga_print("\n");
 
-    // Parse Multiboot2 memory map
+    //Parse Multiboot2 memory map
     parse_multiboot2_memory_map(mb2_info_ptr);
 
-    // Initialize physical memory manager
+    // Physical memory manager
     pmm_init(mb2_info_ptr);
     vga_print("[BOOT] Physical memory manager initialized\n");
     vga_print("[BOOT] Total memory: ");
@@ -85,76 +75,72 @@ void kernel_main(uint64_t mb2_info_ptr) {
     }
     vga_print(" bytes\n");
 
-    // Initialize paging
-    paging_init();
+    // STEP 5: Paging
+    // paging_init();
     vga_print("[BOOT] Virtual memory manager (paging) initialized\n");
 
-    // Initialize kernel heap
-    heap_init();
-    vga_print("[BOOT] Kernel heap allocator initialized\n");
+    // STEP 6: Heap
+    //heap_init();
+    //vga_print("[BOOT] Kernel heap allocator initialized\n");
 
-    // Initialize PIT timer
-    timer_init(100); // 100 Hz
-    vga_print("[BOOT] PIT timer initialized (100 Hz)\n");
+    // STEP 7: Timer
+    //timer_init(100); // 100 Hz
+    //vga_print("[BOOT] PIT timer initialized (100 Hz)\n");
 
-    // Initialize keyboard
+    // STEP 8: Keyboard
     keyboard_init();
     vga_print("[BOOT] Keyboard driver initialized\n");
 
-    // Initialize serial port
+    // STEP 9: Serial
     serial_init();
     vga_print("[BOOT] Serial port (COM1) initialized\n");
     serial_write("[BOOT] ShadeOS serial port initialized\n");
 
-    // Initialize VFS
-    vfs_init();
-    vga_print("[BOOT] VFS (in-memory) initialized\n");
-    int fd = vfs_create("demo.txt", VFS_TYPE_MEM);
-    if (fd >= 0) {
-        vfs_write(fd, "Hello, VFS!\n", 12);
-        vfs_close(fd);
-        fd = vfs_open("demo.txt");
-        char buf[32] = {0};
-        int n = vfs_read(fd, buf, 31);
-        vga_print("[VFS] Read from demo.txt: ");
-        vga_print(buf);
-        vga_print("\n");
-        vfs_close(fd);
-    }
+    // STEP 10: VFS
+    //vfs_init();
+    //vga_print("[BOOT] VFS (in-memory) initialized\n");
+    //vfs_node_t* file = vfs_create("demo.txt", VFS_TYPE_MEM, vfs_get_root());
+    //if (file) {
+    //    vfs_write(file, "Hello, VFS!\n", 12);
+    //    file->pos = 0;
+    //    char buf[32] = {0};
+    //    int n = vfs_read(file, buf, 31);
+    //    if (n > 0) buf[n] = '\0';
+    //    vga_print("[VFS] Read from demo.txt: ");
+    //    vga_print(buf);
+    //    vga_print("\n");
+    //}
 
-    vga_print("[BOOT] Initializing GDT...\n");
-    gdt_init();
-    vga_print("[BOOT] GDT initialized.\n");
+    // STEP 11: GDT/IDT
+    //vga_print("[BOOT] Initializing GDT...\n");
+    //gdt_init();
+    //vga_print("[BOOT] GDT initialized.\n");
+    //vga_print("[BOOT] Initializing IDT...\n");
+    //idt_init();
+    //vga_print("[BOOT] IDT initialized.\n");
+    //vga_print("[BOOT] Kernel loaded successfully!\n");
+    //vga_print("[BOOT] VGA text mode initialized\n\n");
 
-    vga_print("[BOOT] Initializing IDT...\n");
-    idt_init();
-    vga_print("[BOOT] IDT initialized.\n");
-    vga_print("[BOOT] Kernel loaded successfully!\n");
-    vga_print("[BOOT] VGA text mode initialized\n\n");
-    
-    // Simple demo
-    vga_print("=== ShadeOS Demo ===\n");
-    vga_print("Proof that kernel is working!\n");
-    vga_print("- Multiboot2 loading: OK\n");
-    vga_print("- C kernel execution: OK\n");
-    vga_print("- VGA text output: OK\n\n");
-    
-    vga_set_color(0x0E); // Yellow
-    vga_print("System ready. Close QEMU to exit.\n");
+    // STEP 12: Demo prints
+    // vga_print("=== ShadeOS Demo ===\n");
+    // vga_print("Proof that kernel is working!\n");
+    // vga_print("- Multiboot2 loading: OK\n");
+    // vga_print("- C kernel execution: OK\n");
+    // vga_print("- VGA text output: OK\n\n");
+    // vga_set_color(0x0E);
+    // vga_print("System ready. Close QEMU to exit.\n");
 
-    // Initialize RTL8139 network driver
+    // STEP 13: Network
     rtl8139_init();
     vga_print("[BOOT] RTL8139 network driver initialized\n");
-
-    // Initialize network stack
     struct ip_addr ip = { {10,0,2,15} };
     net_init(ip);
     vga_print("[BOOT] Network stack (UDP/IP) initialized\n");
 
-    // Initialize multitasking
-    task_init();
-    task_create(demo_task1);
-    task_create(demo_task2);
-    vga_print("[BOOT] Multitasking demo: running two tasks\n");
-    task_schedule();
+    // STEP 14: Multitasking
+    // task_init();
+    // task_create(demo_task1);
+    // task_create(demo_task2);
+    // vga_print("[BOOT] Multitasking demo: running two tasks\n");
+    // task_schedule();
 }

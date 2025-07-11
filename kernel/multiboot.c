@@ -1,4 +1,6 @@
 #include "kernel.h"
+#include <stdint.h>
+#include "serial.h"
 
 #define MULTIBOOT2_TAG_TYPE_MMAP 6
 #define MULTIBOOT2_TAG_ALIGN 8
@@ -24,12 +26,51 @@ typedef struct {
 
 void parse_multiboot2_memory_map(uint64_t mb2_info_ptr) {
     vga_print("[BOOT] Parsing Multiboot2 memory map...\n");
+    serial_write_hex("[MB2] mb2_info_ptr: ", mb2_info_ptr);
+    
+    // For now, just skip Multiboot2 parsing to avoid the infinite loop
+    vga_print("[BOOT] Skipping Multiboot2 parsing for now\n");
+    return;
+    
+    // Check if pointer is valid and aligned
+    if (mb2_info_ptr == 0 || (mb2_info_ptr & 0x7) != 0) {
+        vga_print("[BOOT] ERROR: Invalid or unaligned Multiboot2 info pointer!\n");
+        return;
+    }
+    
     uint8_t* mb2 = (uint8_t*)mb2_info_ptr;
     uint32_t total_size = *(uint32_t*)mb2;
     uint32_t reserved = *(uint32_t*)(mb2 + 4);
+    
+    serial_write_hex("[MB2] total_size: ", total_size);
+    serial_write_hex("[MB2] reserved: ", reserved);
+    
+    // Debug: Print first 32 bytes at mb2_info_ptr
+    vga_print("[MB2] Raw bytes: ");
+    for (int i = 0; i < 32; i++) {
+        uint8_t byte = mb2[i];
+        vga_putchar(' ');
+        if (byte < 0x10) vga_putchar('0');
+        uint8_t digit = (byte >> 4) & 0xF;
+        vga_putchar(digit < 10 ? '0' + digit : 'A' + digit - 10);
+        digit = byte & 0xF;
+        vga_putchar(digit < 10 ? '0' + digit : 'A' + digit - 10);
+    }
+    vga_print("\n");
+    
+    // Validate total_size
+    if (total_size < 8 || total_size > 0x1000000) {
+        vga_print("[BOOT] ERROR: Invalid total_size!\n");
+        return;
+    }
+    
     (void)reserved;
     mb2_tag_t* tag = (mb2_tag_t*)(mb2 + 8);
-    while ((uint8_t*)tag < mb2 + total_size) {
+    serial_write_hex("[MB2] first tag type: ", tag->type);
+    serial_write_hex("[MB2] first tag size: ", tag->size);
+    int tag_count = 0;
+    while ((uint8_t*)tag < mb2 + total_size && tag_count < 20) {
+        tag_count++;
         if (tag->type == MULTIBOOT2_TAG_TYPE_MMAP) {
             mb2_tag_mmap_t* mmap_tag = (mb2_tag_mmap_t*)tag;
             vga_print("[BOOT] Found memory map tag\n");
@@ -57,6 +98,6 @@ void parse_multiboot2_memory_map(uint64_t mb2_info_ptr) {
             }
         }
         // Move to next tag (aligned)
-        tag = (mb2_tag_t*)(((uint8_t*)tag + tag->size + MULTIBOOT2_TAG_ALIGN - 1) & ~(MULTIBOOT2_TAG_ALIGN - 1));
+        tag = (mb2_tag_t*)(((uintptr_t)((uint8_t*)tag + tag->size + MULTIBOOT2_TAG_ALIGN - 1)) & ~(uintptr_t)(MULTIBOOT2_TAG_ALIGN - 1));
     }
 } 

@@ -21,7 +21,6 @@ static struct idt_entry idt[256];
 static struct idt_ptr idt_pointer;
 
 extern void idt_flush(uint64_t);
-extern void isr_stub_table(); // Table of 256 ISR stubs
 
 // Forward declarations for device handlers
 void timer_interrupt_handler();

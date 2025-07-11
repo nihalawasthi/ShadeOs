@@ -34,3 +34,15 @@ int serial_getchar() {
 void serial_write(const char* str) {
     while (*str) serial_putchar(*str++);
 } 
+void serial_write_hex(const char* label, uint64_t value) {
+    char buf[32];
+    serial_write(label);
+    for (int i = 60; i >= 0; i -= 4) {
+        uint8_t digit = (value >> i) & 0xF;
+        buf[15 - i/4] = (digit < 10) ? ('0' + digit) : ('A' + digit - 10);
+    }
+    buf[16] = 0;
+    serial_write("0x");
+    serial_write(buf);
+    serial_write("\n");
+}

@@ -13,6 +13,12 @@ isr_stub_table:
 %assign i i+1
 %endrep
 
+global idt_flush
+idt_flush:
+    mov rax, rdi
+    lidt [rax]
+    ret
+
 %macro ISR_STUB 1
     global isr_stub_%1
 isr_stub_%1:

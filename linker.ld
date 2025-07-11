@@ -12,6 +12,7 @@ SECTIONS
 
     /* Text section with entry point */
     .text ALIGN(4K) : {
+        PROVIDE(_kernel_start = .);
         *(.text)
     }
 
@@ -32,5 +33,5 @@ SECTIONS
     }
     
     . = ALIGN(4K);
-    kernel_end = .;
+    PROVIDE(_kernel_end = .);
 }

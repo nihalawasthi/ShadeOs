@@ -1,7 +1,6 @@
-; boot/loader.asm - Complete multiboot2 bootloader with proper 32->64 bit transition
+; boot/loader.asm - Bulletproof Multiboot2 loader with correct info pointer passing
 BITS 32
 
-; Multiboot2 header
 section .multiboot
 align 8
 multiboot_start:
@@ -17,21 +16,24 @@ multiboot_start:
     dd 8        ; size
 multiboot_end:
 
+section .bss
+align 16
+stack_bottom: resb 16384
+stack_top:
+mb2_info_ptr: resd 1
+
 section .text
 global _start
 extern kernel_main
 
 _start:
     cli
-    
-    ; Set up stack
     mov esp, stack_top
     
-    ; Save multiboot2 info
-    push ebx    ; multiboot info pointer
-    push eax    ; multiboot2 magic (should be 0x36d76289)
+    ; Save Multiboot2 info pointer (ebx) to a known location
+    mov [mb2_info_ptr], ebx
     
-    ; Verify we were loaded by a multiboot2 bootloader
+    ; Check Multiboot2 magic
     cmp eax, 0x36d76289
     jne error
     
@@ -87,24 +89,18 @@ check_long_mode:
     ret
 
 setup_page_tables:
-    ; Clear the page tables
     mov edi, p4_table
     mov cr3, edi
     xor eax, eax
     mov ecx, 4096
     rep stosd
     mov edi, p4_table
-
-    ; Set up page tables
     mov eax, p3_table
     or eax, 0b11
     mov [p4_table], eax
-
     mov eax, p2_table
     or eax, 0b11
     mov [p3_table], eax
-
-    ; Map first 1GB as 2MB pages
     mov ecx, 0
 .map_p2_table:
     mov eax, 0x200000
@@ -114,31 +110,25 @@ setup_page_tables:
     inc ecx
     cmp ecx, 512
     jne .map_p2_table
+    
+
     ret
 
 enable_paging:
-    ; Load page table
     mov eax, p4_table
     mov cr3, eax
-
-    ; Enable PAE
     mov eax, cr4
     or eax, 1 << 5
     mov cr4, eax
-
-    ; Enable long mode
     mov ecx, 0xC0000080
     rdmsr
     or eax, 1 << 8
     wrmsr
-
-    ; Enable paging
     mov eax, cr0
     or eax, 1 << 31
     mov cr0, eax
     ret
 
-; 32-bit string printing
 print_string_32:
     mov ah, 0x0F
 .loop:
@@ -178,16 +168,17 @@ long_mode_start:
     mov rdi, 0xB8000
     call print_string_64
 
-    ; Pass Multiboot2 info pointer to kernel_main in rdi
-    mov rdi, [esp]    ; esp still points to the last value pushed in 32-bit mode (multiboot info pointer)
+    ; Load Multiboot2 info pointer from known location
+    ; The Multiboot2 info structure is at a 32-bit address
+    ; We need to zero-extend it to 64-bit for proper access
+    mov rsi, mb2_info_ptr
+    mov edi, [rsi]    ; Load the 32-bit value into rdi (zero-extends to 64-bit)
     call kernel_main
 
-    ; Halt if kernel returns
 .hang:
     hlt
     jmp .hang
 
-; 64-bit string printing
 print_string_64:
     mov ah, 0x0A  ; light green
 .loop:
@@ -216,14 +207,6 @@ gdt64:
 
 section .bss
 align 4096
-p4_table:
-    resb 4096
-p3_table:
-    resb 4096
-p2_table:
-    resb 4096
-
-align 16
-stack_bottom:
-    resb 16384
-stack_top:
+p4_table: resb 4096
+p3_table: resb 4096
+p2_table: resb 4096

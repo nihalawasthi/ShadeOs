@@ -6,7 +6,7 @@
 
 static task_t tasks[MAX_TASKS];
 static int num_tasks = 0;
-static task_t* current = 0;
+task_t* current = 0;
 
 extern void task_switch(uint64_t* old_rsp, uint64_t new_rsp);
 
@@ -93,25 +93,25 @@ void task_yield() {
 // Assembly context switch (save/restore rsp)
 __attribute__((naked)) void task_switch(uint64_t* old_rsp, uint64_t new_rsp) {
     __asm__ volatile (
-        "mov [rdi], rsp\n"
-        "mov rsp, rsi\n"
+        "movq %rsp, (%rdi)\n"
+        "movq %rsi, %rsp\n"
         "ret\n"
     );
 }
 
 __attribute__((naked)) void enter_user_mode(uint64_t rsp) {
     __asm__ volatile (
-        "mov rsp, rdi\n"
-        "pop rax\n" // SS
-        "pop rbx\n" // RSP
-        "pop rcx\n" // RFLAGS
-        "pop rdx\n" // CS
-        "pop rsi\n" // RIP
-        "push rax\n"
-        "push rbx\n"
-        "push rcx\n"
-        "push rdx\n"
-        "push rsi\n"
+        "movq %rdi, %rsp\n"
+        "pop %rax\n" // SS
+        "pop %rbx\n" // RSP
+        "pop %rcx\n" // RFLAGS
+        "pop %rdx\n" // CS
+        "pop %rsi\n" // RIP
+        "push %rax\n"
+        "push %rbx\n"
+        "push %rcx\n"
+        "push %rdx\n"
+        "push %rsi\n"
         "iretq\n"
     );
 }

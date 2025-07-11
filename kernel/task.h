@@ -18,6 +18,8 @@ typedef struct task {
     struct task* next;
 } task_t;
 
+extern task_t* current;
+
 void task_init();
 int task_create(void (*entry)(void));
 int task_create_user(void (*entry)(void), void* user_stack, int stack_size, void* arg);
