@@ -3,28 +3,35 @@
 
 #include "kernel.h"
 
-#define MAX_FILES 16
+#define MAX_FILES 64
 #define MAX_FILE_NAME 32
 #define MAX_FILE_SIZE 4096
 
 // File types
 #define VFS_TYPE_MEM 1
+#define VFS_TYPE_DIR 2
 
-// File descriptor
-typedef struct vfs_file {
+// File/directory node
+typedef struct vfs_node {
     char name[MAX_FILE_NAME];
     int type;
     int size;
     int pos;
     void* data;
     int used;
-} vfs_file_t;
+    struct vfs_node* parent;
+    struct vfs_node* child;
+    struct vfs_node* sibling;
+} vfs_node_t;
 
 void vfs_init();
-int vfs_create(const char* name, int type);
-int vfs_open(const char* name);
-int vfs_read(int fd, void* buf, int size);
-int vfs_write(int fd, const void* buf, int size);
-void vfs_close(int fd);
+vfs_node_t* vfs_create(const char* name, int type, vfs_node_t* parent);
+vfs_node_t* vfs_find(const char* path, vfs_node_t* cwd);
+int vfs_read(vfs_node_t* node, void* buf, int size);
+int vfs_write(vfs_node_t* node, const void* buf, int size);
+void vfs_list(vfs_node_t* dir);
+
+// For shell integration
+vfs_node_t* vfs_get_root();
 
 #endif 

@@ -7,6 +7,9 @@
 #include "keyboard.h"
 #include "serial.h"
 #include "vfs.h"
+#include "shell.h"
+#include "rtl8139.h"
+#include "net.h"
 
 void kernel_main(uint64_t mb2_info_ptr) {
     // First thing - write directly to VGA to test if we even get here
@@ -118,9 +121,17 @@ void kernel_main(uint64_t mb2_info_ptr) {
     
     vga_set_color(0x0E); // Yellow
     vga_print("System ready. Close QEMU to exit.\n");
-    
-    // Infinite loop
-    while (1) {
-        __asm__ volatile("hlt");
-    }
+
+    // Initialize RTL8139 network driver
+    rtl8139_init();
+    vga_print("[BOOT] RTL8139 network driver initialized\n");
+
+    // Initialize network stack
+    struct ip_addr ip = { {10,0,2,15} };
+    net_init(ip);
+    vga_print("[BOOT] Network stack (UDP/IP) initialized\n");
+
+    // Start shell
+    shell_init();
+    shell_run();
 }

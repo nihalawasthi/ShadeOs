@@ -1,64 +1,107 @@
 #include "vfs.h"
 #include "heap.h"
 #include "kernel.h"
+#include "string.h"
 
-static vfs_file_t files[MAX_FILES];
+static vfs_node_t nodes[MAX_FILES];
+static vfs_node_t* root = 0;
+
+vfs_node_t* vfs_get_root() { return root; }
 
 void vfs_init() {
     for (int i = 0; i < MAX_FILES; i++) {
-        files[i].used = 0;
-        files[i].data = NULL;
+        nodes[i].used = 0;
+        nodes[i].data = NULL;
+        nodes[i].parent = nodes[i].child = nodes[i].sibling = NULL;
     }
+    root = &nodes[0];
+    root->used = 1;
+    root->type = VFS_TYPE_DIR;
+    root->size = 0;
+    root->pos = 0;
+    root->parent = NULL;
+    root->child = NULL;
+    root->sibling = NULL;
+    root->name[0] = '/'; root->name[1] = 0;
 }
 
-int vfs_create(const char* name, int type) {
+vfs_node_t* vfs_create(const char* name, int type, vfs_node_t* parent) {
     for (int i = 0; i < MAX_FILES; i++) {
-        if (!files[i].used) {
-            files[i].used = 1;
-            files[i].type = type;
-            files[i].size = 0;
-            files[i].pos = 0;
-            files[i].data = kmalloc(MAX_FILE_SIZE);
-            for (int j = 0; j < MAX_FILE_NAME; j++) files[i].name[j] = 0;
-            for (int j = 0; name[j] && j < MAX_FILE_NAME-1; j++) files[i].name[j] = name[j];
-            return i;
+        if (!nodes[i].used) {
+            nodes[i].used = 1;
+            nodes[i].type = type;
+            nodes[i].size = 0;
+            nodes[i].pos = 0;
+            nodes[i].data = (type == VFS_TYPE_MEM) ? kmalloc(MAX_FILE_SIZE) : NULL;
+            nodes[i].parent = parent;
+            nodes[i].child = NULL;
+            nodes[i].sibling = NULL;
+            for (int j = 0; j < MAX_FILE_NAME; j++) nodes[i].name[j] = 0;
+            for (int j = 0; name[j] && j < MAX_FILE_NAME-1; j++) nodes[i].name[j] = name[j];
+            // Insert as child of parent
+            if (parent) {
+                if (!parent->child) parent->child = &nodes[i];
+                else {
+                    vfs_node_t* sib = parent->child;
+                    while (sib->sibling) sib = sib->sibling;
+                    sib->sibling = &nodes[i];
+                }
+            }
+            return &nodes[i];
         }
     }
-    return -1;
+    return NULL;
 }
 
-int vfs_open(const char* name) {
-    for (int i = 0; i < MAX_FILES; i++) {
-        if (files[i].used && !strcmp(files[i].name, name)) {
-            files[i].pos = 0;
-            return i;
-        }
+// Find node by path (absolute or relative to cwd)
+vfs_node_t* vfs_find(const char* path, vfs_node_t* cwd) {
+    if (!path || !*path) return NULL;
+    vfs_node_t* cur = (path[0] == '/') ? root : cwd;
+    int i = (path[0] == '/') ? 1 : 0;
+    char part[MAX_FILE_NAME];
+    while (path[i]) {
+        int j = 0;
+        while (path[i] && path[i] != '/') part[j++] = path[i++];
+        part[j] = 0;
+        if (path[i] == '/') i++;
+        if (!part[0]) continue;
+        vfs_node_t* child = cur->child;
+        while (child && strcmp(child->name, part)) child = child->sibling;
+        if (!child) return NULL;
+        cur = child;
     }
-    return -1;
+    return cur;
 }
 
-int vfs_read(int fd, void* buf, int size) {
-    if (fd < 0 || fd >= MAX_FILES || !files[fd].used) return -1;
+void vfs_list(vfs_node_t* dir) {
+    if (!dir || dir->type != VFS_TYPE_DIR) return;
+    vfs_node_t* child = dir->child;
+    while (child) {
+        vga_print(child->name);
+        if (child->type == VFS_TYPE_DIR) vga_print("/");
+        vga_print("  ");
+        child = child->sibling;
+    }
+    vga_print("\n");
+}
+
+int vfs_read(vfs_node_t* node, void* buf, int size) {
+    if (!node || node->type != VFS_TYPE_MEM) return -1;
     int to_read = size;
-    if (files[fd].pos + to_read > files[fd].size) to_read = files[fd].size - files[fd].pos;
+    if (node->pos + to_read > node->size) to_read = node->size - node->pos;
     if (to_read <= 0) return 0;
-    memcpy(buf, (uint8_t*)files[fd].data + files[fd].pos, to_read);
-    files[fd].pos += to_read;
+    memcpy(buf, (uint8_t*)node->data + node->pos, to_read);
+    node->pos += to_read;
     return to_read;
 }
 
-int vfs_write(int fd, const void* buf, int size) {
-    if (fd < 0 || fd >= MAX_FILES || !files[fd].used) return -1;
+int vfs_write(vfs_node_t* node, const void* buf, int size) {
+    if (!node || node->type != VFS_TYPE_MEM) return -1;
     int to_write = size;
-    if (files[fd].pos + to_write > MAX_FILE_SIZE) to_write = MAX_FILE_SIZE - files[fd].pos;
+    if (node->pos + to_write > MAX_FILE_SIZE) to_write = MAX_FILE_SIZE - node->pos;
     if (to_write <= 0) return 0;
-    memcpy((uint8_t*)files[fd].data + files[fd].pos, buf, to_write);
-    files[fd].pos += to_write;
-    if (files[fd].pos > files[fd].size) files[fd].size = files[fd].pos;
+    memcpy((uint8_t*)node->data + node->pos, buf, to_write);
+    node->pos += to_write;
+    if (node->pos > node->size) node->size = node->pos;
     return to_write;
-}
-
-void vfs_close(int fd) {
-    if (fd < 0 || fd >= MAX_FILES || !files[fd].used) return;
-    files[fd].pos = 0;
 } 
