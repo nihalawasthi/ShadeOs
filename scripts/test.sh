@@ -1,40 +1,74 @@
 #!/bin/zsh
-# test.sh - Essential kernel testing
+# test.sh - Unified kernel and GRUB testing
 
 set -e
 
-echo "🧪 Testing Kernel"
-echo "================"
+MODE=${1:-kernel}
 
-if [[ ! -f kernel.bin ]]; then
-    echo "❌ No kernel binary found"
+usage() {
+    echo "Usage: $0 [kernel|grub]"
+    echo "  kernel: Test direct kernel boot (default)"
+    echo "  grub:   Test GRUB/ISO boot"
     exit 1
-fi
+}
 
-# Test ISO boot instead of direct kernel loading
-echo "Testing ISO boot (this is the proper way)..."
-if [[ -f shadeOS.iso ]]; then
-    echo "✅ ISO found, testing boot process..."
-    
-    # Quick 3-second test to see if it gets past GRUB
-    timeout 3s qemu-system-x86_64 \
-        -cdrom shadeOS.iso \
-        -m 512M \
-        -serial file:boot.log \
-        -display none \
-        -no-reboot \
-        -no-shutdown &>/dev/null || true
-    
-    if [[ -f boot.log ]]; then
-        if grep -q "Welcome to GRUB" boot.log; then
-            echo "✅ GRUB loads successfully"
-            echo "✅ Boot test passed - ISO is bootable"
-            rm -f boot.log
-            exit 0
+case "$MODE" in
+    kernel)
+        echo "🧪 Testing Kernel (direct boot)"
+        echo "=============================="
+        if [[ ! -f kernel.bin ]]; then
+            echo "❌ No kernel binary found"
+            exit 1
         fi
-    fi
-fi
-
-echo "⚠️  Boot test inconclusive, but ISO was built successfully"
-rm -f boot.log
-exit 0
+        echo "Running QEMU with kernel.bin..."
+        qemu-system-x86_64 \
+            -kernel kernel.bin \
+            -m 512M \
+            -serial stdio \
+            -display none \
+            -no-reboot \
+            -no-shutdown &
+        QEMU_PID=$!
+        echo "QEMU started (PID: $QEMU_PID)"
+        echo "Wait a few seconds to observe output. Press Ctrl+C to stop."
+        wait $QEMU_PID || true
+        ;;
+    grub)
+        echo "🧪 Testing GRUB/ISO Boot"
+        echo "========================"
+        if [[ ! -f shadeOS.iso ]]; then
+            echo "❌ shadeOS.iso not found"
+            exit 1
+        fi
+        echo "📊 ISO Analysis:"
+        echo "Size: $(stat -c%s shadeOS.iso) bytes"
+        echo "Type: $(file shadeOS.iso)"
+        echo ""
+        echo "🔍 Checking ISO contents:"
+        if command -v isoinfo &> /dev/null; then
+            echo "ISO directory structure:"
+            isoinfo -l -i shadeOS.iso
+        else
+            echo "⚠️  isoinfo not available, installing..."
+            sudo pacman -S --noconfirm cdrtools
+            echo "ISO directory structure:"
+            isoinfo -l -i shadeOS.iso
+        fi
+        echo ""
+        echo "🧪 Testing kernel loading with verbose GRUB output:"
+        qemu-system-x86_64 \
+            -cdrom shadeOS.iso \
+            -m 512M \
+            -serial stdio \
+            -d guest_errors \
+            -no-reboot \
+            -no-shutdown &
+        QEMU_PID=$!
+        echo "QEMU started (PID: $QEMU_PID)"
+        echo "Try selecting a menu option. Press Ctrl+C here to stop."
+        wait $QEMU_PID || true
+        ;;
+    *)
+        usage
+        ;;
+esac
