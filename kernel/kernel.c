@@ -25,7 +25,15 @@ void kernel_main(void) {
     vga_print("ShadeOS v0.1\n");
     vga_set_color(0x0F); // White
     vga_print("======================================\n\n");
-    
+
+
+    vga_print("[BOOT] Initializing GDT...\n");
+    gdt_init();
+    vga_print("[BOOT] GDT initialized.\n");
+
+    vga_print("[BOOT] Initializing IDT...\n");
+    idt_init();
+    vga_print("[BOOT] IDT initialized.\n");
     vga_print("[BOOT] Kernel loaded successfully!\n");
     vga_print("[BOOT] VGA text mode initialized\n\n");
     
