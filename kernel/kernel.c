@@ -10,6 +10,26 @@
 #include "shell.h"
 #include "rtl8139.h"
 #include "net.h"
+#include "task.h"
+
+void demo_task1() {
+    while (1) {
+        vga_set_color(0x0B);
+        vga_print("[Task1] Hello from Task 1\n");
+        serial_write("[Task1] Hello from Task 1\n");
+        for (volatile int i = 0; i < 10000000; i++);
+        task_yield();
+    }
+}
+void demo_task2() {
+    while (1) {
+        vga_set_color(0x0E);
+        vga_print("[Task2] Hello from Task 2\n");
+        serial_write("[Task2] Hello from Task 2\n");
+        for (volatile int i = 0; i < 10000000; i++);
+        task_yield();
+    }
+}
 
 void kernel_main(uint64_t mb2_info_ptr) {
     // First thing - write directly to VGA to test if we even get here
@@ -131,7 +151,10 @@ void kernel_main(uint64_t mb2_info_ptr) {
     net_init(ip);
     vga_print("[BOOT] Network stack (UDP/IP) initialized\n");
 
-    // Start shell
-    shell_init();
-    shell_run();
+    // Initialize multitasking
+    task_init();
+    task_create(demo_task1);
+    task_create(demo_task2);
+    vga_print("[BOOT] Multitasking demo: running two tasks\n");
+    task_schedule();
 }

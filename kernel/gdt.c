@@ -43,3 +43,9 @@ void gdt_init() {
     
     gdt_flush((uint64_t)&gdt_pointer);
 }
+
+// Export selectors for user mode
+uint16_t gdt_kernel_code = 0x08;
+uint16_t gdt_kernel_data = 0x10;
+uint16_t gdt_user_code = 0x18;
+uint16_t gdt_user_data = 0x20;
