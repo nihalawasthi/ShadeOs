@@ -23,63 +23,54 @@ void paging_init() {
     vga_print("[BOOT] Initializing paging...\n");
     serial_write("[PAGING] paging_init: start\n");
     pml4_table = (uint64_t*)alloc_page();
-    serial_write_hex("[PAGING] pml4_table alloc: ", (uint64_t)pml4_table);
     memset(pml4_table, 0, PAGE_SIZE);
-    serial_write("[PAGING] pml4_table memset done\n");
 
     // Identity map kernel (1 MiB to 16 MiB)
     for (uint64_t addr = 0x100000; addr < 0x1000000; addr += PAGE_SIZE) {
-        serial_write_hex("[PAGING] map_page: ", addr);
         map_page(addr, addr, PAGE_PRESENT | PAGE_RW);
     }
     serial_write("[PAGING] kernel identity map done\n");
 
     // Identity map VGA (0xB8000)
-    serial_write("[PAGING] map_page VGA\n");
     map_page(0xB8000, 0xB8000, PAGE_PRESENT | PAGE_RW);
     serial_write("[PAGING] VGA map done\n");
 
     // Load new PML4
-    serial_write_hex("[PAGING] loading CR3: ", (uint64_t)pml4_table);
     __asm__ volatile("mov %0, %%cr3" : : "r"(pml4_table));
     vga_print("[BOOT] Paging enabled\n");
     serial_write("[PAGING] paging_init: done\n");
 }
 
 void map_page(uint64_t virt_addr, uint64_t phys_addr, uint64_t flags) {
-    serial_write_hex("[PAGING] map_page virt: ", virt_addr);
     uint64_t* pml4 = pml4_table;
-    if (!pml4) { serial_write("[PAGING] map_page: pml4 null\n"); return; }
+    if (!pml4) return;
+    
     // PML4
     if (!(pml4[get_pml4_index(virt_addr)] & PAGE_PRESENT)) {
         uint64_t pdpt = (uint64_t)alloc_page();
-        serial_write_hex("[PAGING] alloc pdpt: ", pdpt);
         memset((void*)pdpt, 0, PAGE_SIZE);
-        serial_write("[PAGING] pdpt memset done\n");
         pml4[get_pml4_index(virt_addr)] = pdpt | PAGE_PRESENT | PAGE_RW;
     }
     uint64_t* pdpt = get_table(pml4[get_pml4_index(virt_addr)] & ~0xFFFULL);
+    
     // PDPT
     if (!(pdpt[get_pdpt_index(virt_addr)] & PAGE_PRESENT)) {
         uint64_t pd = (uint64_t)alloc_page();
-        serial_write_hex("[PAGING] alloc pd: ", pd);
         memset((void*)pd, 0, PAGE_SIZE);
-        serial_write("[PAGING] pd memset done\n");
         pdpt[get_pdpt_index(virt_addr)] = pd | PAGE_PRESENT | PAGE_RW;
     }
     uint64_t* pd = get_table(pdpt[get_pdpt_index(virt_addr)] & ~0xFFFULL);
+    
     // PD
     if (!(pd[get_pd_index(virt_addr)] & PAGE_PRESENT)) {
         uint64_t pt = (uint64_t)alloc_page();
-        serial_write_hex("[PAGING] alloc pt: ", pt);
         memset((void*)pt, 0, PAGE_SIZE);
-        serial_write("[PAGING] pt memset done\n");
         pd[get_pd_index(virt_addr)] = pt | PAGE_PRESENT | PAGE_RW;
     }
     uint64_t* pt = get_table(pd[get_pd_index(virt_addr)] & ~0xFFFULL);
+    
     // PT
     pt[get_pt_index(virt_addr)] = (phys_addr & ~0xFFFULL) | (flags & 0xFFF) | PAGE_PRESENT;
-    serial_write("[PAGING] map_page done\n");
 }
 
 void unmap_page(uint64_t virt_addr) {

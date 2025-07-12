@@ -7,6 +7,7 @@
 #include "string.h"
 #include "pkg.h"
 #include "net.h"
+#include "serial.h"
 
 #define SHELL_INPUT_MAX 128
 #define SHELL_HISTORY 8
@@ -19,21 +20,8 @@ static vfs_node_t* cwd = 0;
 
 static void shell_prompt() {
     vga_set_color(0x0A);
-    // Print current path
-    vfs_node_t* node = cwd;
-    char path[128] = {0};
-    char* p = path + 127;
-    *--p = 0;
-    while (node && node->parent) {
-        int len = strlen(node->name);
-        p -= len;
-        memcpy(p, node->name, len);
-        *--p = '/';
-        node = node->parent;
-    }
-    if (p == path + 127 - 1) *--p = '/';
-    vga_print(p);
-    vga_print(" > ");
+    // Simple prompt when VFS is disabled
+    vga_print("shadeos > ");
     vga_set_color(0x0F);
 }
 
@@ -53,24 +41,11 @@ static void shell_help() {
 }
 
 static void shell_ls(const char* arg) {
-    vfs_node_t* dir = arg && *arg ? vfs_find(arg, cwd) : cwd;
-    if (!dir || dir->type != VFS_TYPE_DIR) {
-        vga_print("ls: not a directory\n");
-        return;
-    }
-    vfs_list(dir);
+    vga_print("ls: VFS not available\n");
 }
 
 static void shell_cat(const char* arg) {
-    vfs_node_t* node = vfs_find(arg, cwd);
-    if (!node || node->type != VFS_TYPE_MEM) {
-        vga_print("cat: file not found\n");
-        return;
-    }
-    char buf[128] = {0};
-    int n = vfs_read(node, buf, 127);
-    if (n > 0) vga_print(buf);
-    vga_print("\n");
+    vga_print("cat: VFS not available\n");
 }
 
 static void shell_echo(const char* arg) {
@@ -79,28 +54,11 @@ static void shell_echo(const char* arg) {
 }
 
 static void shell_mkdir(const char* arg) {
-    if (!arg || !*arg) {
-        vga_print("mkdir: missing operand\n");
-        return;
-    }
-    if (vfs_find(arg, cwd)) {
-        vga_print("mkdir: already exists\n");
-        return;
-    }
-    vfs_create(arg, VFS_TYPE_DIR, cwd);
+    vga_print("mkdir: VFS not available\n");
 }
 
 static void shell_cd(const char* arg) {
-    if (!arg || !*arg) {
-        cwd = vfs_get_root();
-        return;
-    }
-    vfs_node_t* node = vfs_find(arg, cwd);
-    if (!node || node->type != VFS_TYPE_DIR) {
-        vga_print("cd: not a directory\n");
-        return;
-    }
-    cwd = node;
+    vga_print("cd: VFS not available\n");
 }
 
 static void shell_pkg(const char* arg) {
@@ -210,8 +168,11 @@ void shell_init() {
     input_len = 0;
     hist_count = 0;
     hist_pos = 0;
-    cwd = vfs_get_root();
-    pkg_init();
+    // Temporarily disable VFS to avoid crashes
+    cwd = NULL;
+    // pkg_init(); // Temporarily disabled
+    vga_print("[SHELL] Shell initialized (VFS disabled)\n");
+    serial_write("[SHELL] Shell initialized (VFS disabled)\n");
 }
 
 void shell_run() {
@@ -224,7 +185,11 @@ void shell_run() {
         // Read line
         while (1) {
             int c = keyboard_getchar();
-            if (c == -1) continue;
+            if (c == -1) {
+                // Add a small delay to prevent tight loop
+                for (volatile int i = 0; i < 1000; i++);
+                continue;
+            }
             if (c == '\n' || c == '\r') break;
             if (c == 8 && input_len > 0) { // Backspace
                 input_len--;

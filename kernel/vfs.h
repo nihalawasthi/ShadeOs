@@ -3,7 +3,7 @@
 
 #include "kernel.h"
 
-#define MAX_FILES 64
+#define MAX_FILES 32
 #define MAX_FILE_NAME 32
 #define MAX_FILE_SIZE 4096
 
@@ -14,16 +14,16 @@
 
 // File/directory node
 typedef struct vfs_node {
-    char name[MAX_FILE_NAME];
-    int type;
-    int size;
-    int pos;
-    void* data;
-    int used;
-    struct vfs_node* parent;
-    struct vfs_node* child;
-    struct vfs_node* sibling;
-    char fat_filename[12]; // 8.3 name for FAT files, null-terminated
+    char name[MAX_FILE_NAME];     // 32 bytes
+    int type;                     // 4 bytes
+    int size;                     // 4 bytes
+    int pos;                      // 4 bytes
+    int used;                     // 4 bytes (moved up)
+    void* data;                   // 8 bytes (now properly aligned)
+    struct vfs_node* parent;      // 8 bytes
+    struct vfs_node* child;       // 8 bytes
+    struct vfs_node* sibling;     // 8 bytes
+    char fat_filename[12];        // 12 bytes
 } vfs_node_t;
 
 void vfs_init();

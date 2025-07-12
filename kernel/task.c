@@ -3,10 +3,13 @@
 #include "vga.h"
 #include "serial.h"
 #include "gdt.h"
+#include "timer.h"
 
 static task_t tasks[MAX_TASKS];
 static int num_tasks = 0;
 task_t* current = 0;
+static int scheduler_running = 0;
+static int current_task_index = 0;
 
 extern void task_switch(uint64_t* old_rsp, uint64_t new_rsp);
 
@@ -14,6 +17,8 @@ void task_init() {
     for (int i = 0; i < MAX_TASKS; i++) tasks[i].state = TASK_TERMINATED;
     num_tasks = 0;
     current = 0;
+    scheduler_running = 0;
+    current_task_index = 0;
 }
 
 int task_create(void (*entry)(void)) {
@@ -22,6 +27,7 @@ int task_create(void (*entry)(void)) {
             tasks[i].state = TASK_READY;
             tasks[i].id = i;
             tasks[i].rip = (uint64_t)entry;
+            tasks[i].user_mode = 0; // Kernel mode task
             // Set up stack for new task
             uint64_t* stack_top = (uint64_t*)(tasks[i].stack + TASK_STACK_SIZE);
             *(--stack_top) = (uint64_t)entry; // Return address (RIP)
@@ -90,6 +96,23 @@ void task_yield() {
     }
 }
 
+void task_exit() {
+    if (current) {
+        current->state = TASK_TERMINATED;
+        num_tasks--;
+        // Remove from linked list
+        if (current->next == current) {
+            // Only one task left
+            current = 0;
+        } else {
+            task_t* prev = current;
+            while (prev->next != current) prev = prev->next;
+            prev->next = current->next;
+            current = current->next;
+        }
+    }
+}
+
 // Assembly context switch (save/restore rsp)
 __attribute__((naked)) void task_switch(uint64_t* old_rsp, uint64_t new_rsp) {
     __asm__ volatile (
@@ -117,12 +140,39 @@ __attribute__((naked)) void enter_user_mode(uint64_t rsp) {
 }
 
 void task_schedule() {
-    int first = 1;
-    while (1) {
-        task_yield();
-        if (current->user_mode && first) {
-            first = 0;
-            enter_user_mode(current->rsp);
+    if (scheduler_running) return; // Prevent recursive calls
+    scheduler_running = 1;
+    
+    // Simple cooperative multitasking - run each task for a few iterations
+    while (num_tasks > 0) {
+        // Find next ready task
+        task_t* task = 0;
+        for (int i = 0; i < MAX_TASKS; i++) {
+            if (tasks[i].state == TASK_READY) {
+                task = &tasks[i];
+                break;
+            }
+        }
+        
+        if (task) {
+            task->state = TASK_RUNNING;
+            // Execute the task function
+            void (*entry)(void) = (void (*)(void))task->rip;
+            entry();
+            // Task should call task_exit() when done
+        } else {
+            // No more ready tasks
+            break;
         }
     }
+    
+    // If we get here, all tasks have terminated
+    scheduler_running = 0;
+    vga_print("[SCHEDULER] All tasks terminated\n");
+}
+
+// Timer interrupt handler for preemptive scheduling
+void timer_task_handler() {
+    // For now, just use cooperative multitasking
+    // Preemptive scheduling can be added later
 } 

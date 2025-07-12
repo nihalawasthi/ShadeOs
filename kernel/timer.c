@@ -1,5 +1,7 @@
 #include "timer.h"
 #include "kernel.h"
+#include "serial.h"
+#include "task.h"
 
 #define PIT_CHANNEL0 0x40
 #define PIT_COMMAND  0x43
@@ -22,8 +24,11 @@ void timer_interrupt_handler() {
         vga_print("[TIMER] 100 ticks elapsed\n");
         vga_set_color(0x0F); // White
     }
-    // Send EOI to PIC
-    outb(0x20, 0x20);
+    
+    // Call task scheduler for preemptive multitasking
+    timer_task_handler();
+    
+    // EOI is sent by the main isr_handler
 }
 
 uint64_t timer_get_ticks() {

@@ -57,9 +57,6 @@ void pmm_init(uint64_t mb2_info_ptr) {
     mb2_tag_t* tag = (mb2_tag_t*)(mb2 + 8);
     int mmap_found = 0;
     while ((uint8_t*)tag < mb2 + total_size) {
-        // Debug print for every tag
-        serial_write_hex("[MB2] tag type: ", tag->type);
-        serial_write_hex("[MB2] tag size: ", tag->size);
         if (tag->type == MULTIBOOT2_TAG_TYPE_MMAP) {
             mmap_found = 1;
             mb2_tag_mmap_t* mmap_tag = (mb2_tag_mmap_t*)tag;
