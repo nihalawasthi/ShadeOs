@@ -226,7 +226,6 @@ void kernel_main(uint64_t mb2_info_ptr) {
     serial_write("[BOOT] Syscalls initialized\n");
     
     // Start the shell
-    __asm__ volatile ("sti");
     vga_print("[BOOT] Starting shell...\n");
     serial_write("[BOOT] Starting shell...\n");
     shell_run();

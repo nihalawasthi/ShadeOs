@@ -185,11 +185,7 @@ void shell_run() {
         // Read line
         while (1) {
             int c = keyboard_getchar();
-            if (c == -1) {
-                // Add a small delay to prevent tight loop
-                for (volatile int i = 0; i < 1000; i++);
-                continue;
-            }
+            if (c == -1) continue;
             if (c == '\n' || c == '\r') break;
             if (c == 8 && input_len > 0) { // Backspace
                 input_len--;
