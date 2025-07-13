@@ -35,35 +35,15 @@ static void gdt_set_gate(int num, uint32_t base, uint32_t limit, uint8_t access,
 void gdt_init() {
     serial_write("[GDT] Starting GDT initialization\n");
     
-    serial_write("[GDT] Setting up GDT pointer\n");
     gdt_pointer.limit = (sizeof(struct gdt_entry) * 5) - 1;
     gdt_pointer.base = (uint64_t)&gdt;
-    serial_write("[GDT] GDT pointer setup complete\n");
-    
-    serial_write("[GDT] Setting up null segment\n");
     gdt_set_gate(0, 0, 0, 0, 0);                // Null segment
-    serial_write("[GDT] Null segment set\n");
-    
-    serial_write("[GDT] Setting up kernel code segment\n");
     gdt_set_gate(1, 0, 0xFFFFFFFF, 0x9A, 0xAF); // Code segment (64-bit)
-    serial_write("[GDT] Kernel code segment set\n");
-    
-    serial_write("[GDT] Setting up kernel data segment\n");
-    gdt_set_gate(2, 0, 0xFFFFFFFF, 0x92, 0xCF); // Data segment
-    serial_write("[GDT] Kernel data segment set\n");
-    
-    serial_write("[GDT] Setting up user code segment\n");
+    gdt_set_gate(2, 0, 0xFFFFFFFF, 0x92, 0xCF); // Data segment    
     gdt_set_gate(3, 0, 0xFFFFFFFF, 0xFA, 0xAF); // User code segment
-    serial_write("[GDT] User code segment set\n");
-    
-    serial_write("[GDT] Setting up user data segment\n");
     gdt_set_gate(4, 0, 0xFFFFFFFF, 0xF2, 0xCF); // User data segment
-    serial_write("[GDT] User data segment set\n");
-    
-    serial_write("[GDT] About to call gdt_flush\n");
     gdt_flush((uint64_t)&gdt_pointer);
-    serial_write("[GDT] gdt_flush completed\n");
-    
+    serial_write("[GDT] gdt_flush completed\n");    
     serial_write("[GDT] GDT initialization complete\n");
 }
 

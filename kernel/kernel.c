@@ -143,16 +143,12 @@ void kernel_main(uint64_t mb2_info_ptr) {
     timer_init(100); // 100 Hz
     vga_print("[BOOT] PIT timer initialized (100 Hz)\n");
 
-    // STEP 8: Keyboard
-    keyboard_init();
-    vga_print("[BOOT] Keyboard driver initialized\n");
-
-    // STEP 9: Serial
+    // STEP 8: Serial
     serial_init();
     vga_print("[BOOT] Serial port (COM1) initialized\n");
     serial_write("[BOOT] ShadeOS serial port initialized\n");
 
-    // STEP 10: GDT/IDT
+    // STEP 9: GDT/IDT
     vga_print("[BOOT] Initializing GDT...\n");
     gdt_init();
     vga_print("[BOOT] GDT initialized.\n");
@@ -160,10 +156,14 @@ void kernel_main(uint64_t mb2_info_ptr) {
     idt_init();
     vga_print("[BOOT] IDT initialized.\n");
     
-    // STEP 10.5: PIC initialization
+    // STEP 10: PIC initialization
     vga_print("[BOOT] Initializing PIC...\n");
     pic_init();
     vga_print("[BOOT] PIC initialized.\n");
+
+    // STEP 11: Keyboard
+    initialize_keyboard();
+    vga_print("[BOOT] Keyboard driver initialized\n");
     
     vga_print("[BOOT] Kernel loaded successfully!\n");
     vga_print("[BOOT] VGA text mode initialized\n\n");

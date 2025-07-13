@@ -20,9 +20,9 @@ void timer_init(uint32_t frequency) {
 void timer_interrupt_handler() {
     timer_ticks++;
     if (timer_ticks % 100 == 0) {
-        vga_set_color(0x0B); // Cyan
-        vga_print("[TIMER] 100 ticks elapsed\n");
-        vga_set_color(0x0F); // White
+        // vga_set_color(0x0B); // Cyan
+        // vga_print("[TIMER] 100 ticks elapsed\n");
+        // vga_set_color(0x0F); // White
     }
     
     // Call task scheduler for preemptive multitasking

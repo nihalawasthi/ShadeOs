@@ -184,7 +184,7 @@ void shell_run() {
         memset(input_buf, 0, SHELL_INPUT_MAX);
         // Read line
         while (1) {
-            int c = keyboard_getchar();
+            int c = get_ascii_char();
             if (c == -1) continue;
             if (c == '\n' || c == '\r') break;
             if (c == 8 && input_len > 0) { // Backspace
@@ -198,6 +198,7 @@ void shell_run() {
         }
         vga_print("\n");
         if (input_len == 0) continue;
+        input_buf[input_len] = 0; // Ensure null-termination
         // Add to history
         if (hist_count < SHELL_HISTORY) hist_count++;
         for (int i = SHELL_HISTORY-1; i > 0; i--) memcpy(history[i], history[i-1], SHELL_INPUT_MAX);

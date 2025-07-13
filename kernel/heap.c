@@ -19,8 +19,6 @@ static heap_block_t* heap_head = 0;
 static uint64_t heap_end = HEAP_START;
 
 static void map_heap_page(uint64_t addr) {
-    serial_write("[HEAP] Mapping heap page at 0x");
-    // Print address in hex using a simple approach
     char addr_str[32];
     addr_str[0] = '0';
     addr_str[1] = 'x';
@@ -29,8 +27,6 @@ static void map_heap_page(uint64_t addr) {
         addr_str[2 + i] = (digit < 10) ? '0' + digit : 'A' + digit - 10;
     }
     addr_str[18] = '\0';
-    serial_write(addr_str);
-    serial_write("\n");
     
     void* phys = alloc_page();
     if (!phys) {
@@ -39,7 +35,6 @@ static void map_heap_page(uint64_t addr) {
         return;
     }
     
-    serial_write("[HEAP] Allocated physical page at 0x");
     // Print physical address in hex
     char phys_str[32];
     phys_str[0] = '0';
@@ -49,19 +44,14 @@ static void map_heap_page(uint64_t addr) {
         phys_str[2 + i] = (digit < 10) ? '0' + digit : 'A' + digit - 10;
     }
     phys_str[18] = '\0';
-    serial_write(phys_str);
-    serial_write("\n");
     
     map_page(addr, (uint64_t)phys, PAGE_PRESENT | PAGE_RW);
-    serial_write("[HEAP] Page mapped successfully\n");
 }
 
 void heap_init() {
     serial_write("[HEAP] Starting heap initialization\n");
     vga_print("[HEAP] Starting heap initialization\n");
     
-    serial_write("[HEAP] Mapping initial heap pages\n");
-    vga_print("[HEAP] Mapping initial heap pages\n");
     // Map initial heap pages first
     heap_end = HEAP_START + HEAP_INITIAL_SIZE;
     for (uint64_t addr = HEAP_START; addr < heap_end; addr += PAGE_SIZE) {

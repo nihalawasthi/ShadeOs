@@ -85,26 +85,18 @@ void idt_init() {
 
 // Central interrupt handler
 void isr_handler(uint64_t int_no, uint64_t err_code) {
-    serial_write("[ISR] Handler entered\n");
-    serial_write("[INTERRUPT] Interrupt: ");
     char int_str[9];
     for (int i = 0; i < 8; i++) {
         int nibble = (int_no >> ((7 - i) * 4)) & 0xF;
         int_str[i] = (nibble < 10) ? ('0' + nibble) : ('A' + nibble - 10);
     }
     int_str[8] = 0;
-    serial_write("0x");
-    serial_write(int_str);
-    serial_write(" (err: ");
     char err_str[9];
     for (int i = 0; i < 8; i++) {
         int nibble = (err_code >> ((7 - i) * 4)) & 0xF;
         err_str[i] = (nibble < 10) ? ('0' + nibble) : ('A' + nibble - 10);
     }
     err_str[8] = 0;
-    serial_write("0x");
-    serial_write(err_str);
-    serial_write(")\n");
 
     if (int_no == 6) {
         serial_write("[INTERRUPT] Invalid Opcode detected!\n");

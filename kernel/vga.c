@@ -27,6 +27,15 @@ void vga_set_color(uint8_t color) {
 }
 
 void vga_putchar(char c) {
+    if (c == '\b') {
+        if (vga_x > 0) {
+            vga_x--;
+            const int VGA_WIDTH = 80;
+            volatile uint16_t* vga = (uint16_t*)0xB8000;
+            vga[vga_y * VGA_WIDTH + vga_x] = (0x0F << 8) | ' ';
+        }
+        return;
+    }
     if (c == '\n') {
         vga_x = 0;
         vga_y++;
