@@ -1,4 +1,3 @@
-// kernel/gdt.c - Global Descriptor Table
 #include "kernel.h"
 #include "serial.h"
 

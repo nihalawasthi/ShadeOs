@@ -2,6 +2,18 @@
 #include "kernel.h"
 #include "serial.h"
 #include "task.h"
+#include "idt.h"
+
+// Define registers_t if not already defined
+#ifndef registers_t
+typedef struct {
+    unsigned long int dummy;
+} registers_t;
+#endif
+
+// Forward declarations
+void register_interrupt_handler(int n, void (*handler)(registers_t));
+void timer_interrupt_wrapper(registers_t regs);
 
 #define PIT_CHANNEL0 0x40
 #define PIT_COMMAND  0x43
@@ -29,6 +41,12 @@ void timer_interrupt_handler() {
     timer_task_handler();
     
     // EOI is sent by the main isr_handler
+}
+
+// Wrapper function for the interrupt handler
+void timer_interrupt_wrapper(registers_t regs) {
+    (void)regs; // Silence unused parameter warning
+    timer_interrupt_handler();
 }
 
 uint64_t timer_get_ticks() {

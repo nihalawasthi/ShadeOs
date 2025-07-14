@@ -1,4 +1,3 @@
-// kernel/vga.c - VGA text mode driver
 #include "kernel.h"
 
 static uint16_t* vga_buffer = (uint16_t*)0xB8000;

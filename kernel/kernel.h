@@ -1,4 +1,3 @@
-// kernel/kernel.h - Main kernel header
 #ifndef KERNEL_H
 #define KERNEL_H
 
@@ -36,6 +35,11 @@ void kfree(void* ptr);
 void* memset(void* dest, int val, size_t len);
 void* memcpy(void* dest, const void* src, size_t len);
 size_t strlen(const char* str);
+int strcmp(const char* a, const char* b);
+int memcmp(const void* s1, const void* s2, size_t n);
+int snprintf(char* str, size_t size, const char* format, ...);
+int sscanf(const char* str, const char* format, ...);
+
 
 // Port I/O
 uint8_t inb(uint16_t port);
@@ -49,5 +53,13 @@ void outl(uint16_t port, uint32_t data);
 void parse_multiboot2_memory_map(uint64_t mb2_info_ptr);
 
 void kernel_main(uint64_t mb2_info_ptr);
+
+// --- Rust VFS FFI Declarations ---
+// These functions will be implemented in Rust and called from C
+extern int rust_vfs_init();
+extern int rust_vfs_ls(const char* path);
+extern int rust_vfs_read(const char* path, void* buf, int max_len);
+extern int rust_vfs_write(const char* path, const void* buf, int len);
+extern int rust_vfs_mkdir(const char* path);
 
 #endif

@@ -107,10 +107,10 @@ const uint8_t upper_ascii_codes[256] = {
     0x00,  ' ', 0x00, 0x00,     /* 0x38 */
     0x00, 0x00, 0x00, 0x00,     /* 0x3C */
     0x00, 0x00, 0x00, 0x00,     /* 0x40 */
-    0x00, 0x00, 0x00,  '7',     /* 0x44 */
-     '8',  '9',  '-',  '4',     /* 0x48 */
-     '5',  '6',  '+',  '1',     /* 0x4C */
-     '2',  '3',  '0',  '.',     /* 0x50 */
+    0x00, 0x00, 0x00, 0x00,     /* 0x44 */
+    0x00, 0x00, 0x00, 0x00,     /* 0x48 */
+    0x00, 0x00, 0x00, 0x00,     /* 0x4C */
+    0x00, 0x00, 0x00, 0x00,     /* 0x50 */
     0x00, 0x00, 0x00, 0x00,     /* 0x54 */
     0x00, 0x00, 0x00, 0x00      /* 0x58 */
 };
@@ -118,23 +118,23 @@ const uint8_t upper_ascii_codes[256] = {
 // Ensure the driver always uses QWERTY mapping for both shifted and unshifted keys
 
 // shift flags. left shift is bit 0, right shift is bit 1.
-uint8_t shift;
+uint8_t shift = 0;
 // control flags just like shift flags.
-uint8_t ctrl;
-uint8_t keypresses[256];
+uint8_t ctrl = 0;
+uint8_t keypresses[256] = {0};
 static int capslock = 0;
 
 #define BUFFLEN 128
 // New characters are added to hd. characters are pulled off of tl.
 uint8_t kb_buff[BUFFLEN];
-uint8_t kb_buff_hd;
-uint8_t kb_buff_tl;
+uint8_t kb_buff_hd = 0;
+uint8_t kb_buff_tl = 0;
 
 // Map kprint to vga_print and terminal_putchar to vga_putchar for compatibility
 #define kprint vga_print
 #define terminal_putchar vga_putchar
 
-static void poll_keyboard_input() {
+void poll_keyboard_input() {
     // See if there's room in the key buffer, else bug out.
     uint8_t next_hd = (kb_buff_hd + 1) % BUFFLEN;
     if(next_hd == kb_buff_tl) {

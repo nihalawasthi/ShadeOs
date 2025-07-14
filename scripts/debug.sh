@@ -1,4 +1,3 @@
-#!/bin/zsh
 # debug.sh - Unified debug script: auto, boot, multiboot
 
 set -e
@@ -30,6 +29,14 @@ case "$MODE" in
                     cd /tmp && git clone https://aur.archlinux.org/yay.git && cd yay && makepkg -si --noconfirm
                 fi
                 yay -S --noconfirm x86_64-elf-gcc x86_64-elf-binutils
+                return 0
+            fi
+            if ! command -v cargo &> /dev/null; then
+                echo "Installing Rust toolchain..."
+                curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+                source "$HOME/.cargo/env"
+                rustup default nightly
+                rustup target add x86_64-unknown-none
                 return 0
             fi
             if [[ -f kernel.bin ]]; then

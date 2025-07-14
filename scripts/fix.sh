@@ -1,4 +1,3 @@
-#!/bin/zsh
 # fix.sh - Unified fix and test script
 
 set -e
@@ -63,4 +62,4 @@ case "$MODE" in
     *)
         usage
         ;;
-esac 
+esac

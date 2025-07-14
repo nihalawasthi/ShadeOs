@@ -1,4 +1,3 @@
-#!/bin/zsh
 # run.sh - Separate script to run ShadeOS
 
 set -e

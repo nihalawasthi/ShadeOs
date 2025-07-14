@@ -1,4 +1,3 @@
-#!/bin/zsh
 # setup.sh - Essential environment setup and verification
 
 set -e
@@ -17,6 +16,15 @@ if ! command -v x86_64-elf-gcc &> /dev/null; then
     fi
     yay -S --noconfirm x86_64-elf-gcc x86_64-elf-binutils
 fi
+
+# Install Rust toolchain
+if ! command -v rustup &> /dev/null; then
+    echo "Installing rustup..."
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    source "$HOME/.cargo/env"
+fi
+rustup default nightly
+rustup target add x86_64-unknown-none
 
 # Setup aliases
 cat >> ~/.zshrc << 'EOF'
@@ -44,6 +52,8 @@ check_tool "nasm"
 check_tool "qemu-system-x86_64"
 check_tool "grub-mkrescue"
 check_tool "xorriso"
+check_tool "cargo"
+check_tool "rustc"
 
 echo ""
 if [[ $ERRORS -eq 0 ]]; then

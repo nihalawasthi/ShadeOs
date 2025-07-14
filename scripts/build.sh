@@ -1,4 +1,3 @@
-#!/bin/zsh
 # build.sh - Smart build with error handling
 
 set -e

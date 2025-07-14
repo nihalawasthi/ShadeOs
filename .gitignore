@@ -19,21 +19,8 @@
 *.idea/
 *.sublime-workspace
 *.sublime-project
-
-# Rust specific
-/target/
-**/target/
-**/*.rs.bk
-Cargo.lock
-.cargo-ok
-
-# Build directories
 /build/
 /dist/
-/kernel-rs/build/
-/kernel-rs/target/
-
-# Kernel specific
 /kernel.bin
 /kernel.elf
 /boot/*.bin
@@ -47,14 +34,6 @@ Cargo.lock
 /kernel/*.img
 /kernel/*.map
 /kernel/*.d
-/kernel-rs/**/*.o
-/kernel-rs/**/*.bin
-/kernel-rs/**/*.elf
-/kernel-rs/**/*.img
-/kernel-rs/**/*.map
-/kernel-rs/**/*.d
-
-# Scripts and certificates
 /scripts/*.log
 /scripts/*.tmp
 /*.pem

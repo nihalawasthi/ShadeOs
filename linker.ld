@@ -1,4 +1,3 @@
-/* linker.ld - Fixed linker script with proper multiboot placement */
 ENTRY(_start)
 
 SECTIONS

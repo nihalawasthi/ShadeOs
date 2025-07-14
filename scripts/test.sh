@@ -1,4 +1,3 @@
-#!/bin/zsh
 # test.sh - Unified kernel and GRUB testing
 
 set -e

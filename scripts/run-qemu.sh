@@ -1,4 +1,3 @@
-#!/bin/zsh
 # run-qemu.sh - Smart QEMU runner with fallbacks
 
 set -e

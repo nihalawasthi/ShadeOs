@@ -1,4 +1,3 @@
-#!/bin/zsh
 # install.sh - Only handles setup and build, no running
 
 set -e

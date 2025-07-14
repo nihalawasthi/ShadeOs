@@ -1,4 +1,3 @@
-// kernel/kernel.c - Simplified kernel entry point for debugging
 #include "kernel.h"
 #include "pmm.h"
 #include "paging.h"
@@ -6,12 +5,16 @@
 #include "timer.h"
 #include "keyboard.h"
 #include "serial.h"
-#include "vfs.h"
+#include "vfs.h" // Keep this for shell, but its implementation will change
 #include "shell.h"
 #include "rtl8139.h"
 #include "net.h"
 #include "task.h"
 #include "syscall.h"
+#include "blockdev.h" // Needed for blockdev_get in Rust FFI
+
+// Declare the Rust entry point function
+extern void rust_entry_point();
 
 // PIC initialization function
 void pic_init() {
@@ -131,24 +134,24 @@ void kernel_main(uint64_t mb2_info_ptr) {
     }
     vga_print(" bytes\n");
 
-    // STEP 5: Paging
+    // Paging
     paging_init();
     vga_print("[BOOT] Virtual memory manager (paging) initialized\n");
 
-    // STEP 6: Heap
+    // Heap
     heap_init();
     vga_print("[BOOT] Kernel heap allocator initialized\n");
 
-    // STEP 7: Timer
+    // Timer
     timer_init(100); // 100 Hz
     vga_print("[BOOT] PIT timer initialized (100 Hz)\n");
 
-    // STEP 8: Serial
+    // Serial
     serial_init();
     vga_print("[BOOT] Serial port (COM1) initialized\n");
     serial_write("[BOOT] ShadeOS serial port initialized\n");
 
-    // STEP 9: GDT/IDT
+    // GDT/IDT
     vga_print("[BOOT] Initializing GDT...\n");
     gdt_init();
     vga_print("[BOOT] GDT initialized.\n");
@@ -156,35 +159,30 @@ void kernel_main(uint64_t mb2_info_ptr) {
     idt_init();
     vga_print("[BOOT] IDT initialized.\n");
     
-    // STEP 10: PIC initialization
+    // PIC initialization
     vga_print("[BOOT] Initializing PIC...\n");
     pic_init();
     vga_print("[BOOT] PIC initialized.\n");
 
-    // STEP 11: Keyboard
+    // Keyboard
     initialize_keyboard();
     vga_print("[BOOT] Keyboard driver initialized\n");
     
     vga_print("[BOOT] Kernel loaded successfully!\n");
     vga_print("[BOOT] VGA text mode initialized\n\n");
 
-    // STEP 11: VFS
-    // vga_print("[BOOT] Initializing VFS...\n");
-    // vfs_init();
-    // vga_print("[BOOT] VFS (in-memory) initialized\n");
-    // vfs_node_t* file = vfs_create("demo.txt", VFS_TYPE_MEM, vfs_get_root());
-    // if (file) {
-    //     vfs_write(file, "Hello, VFS!\n", 12);
-    //     file->pos = 0;
-    //     char buf[32] = {0};
-    //     int n = vfs_read(file, buf, 31);
-    //     if (n > 0) buf[n] = '\0';
-    //     vga_print("[VFS] Read from demo.txt: ");
-    //     vga_print(buf);
-    //     vga_print("\n");
-    // }
+    // Block Device (for Rust VFS)
+    vga_print("[BOOT] Initializing Block Devices...\n");
+    blockdev_init(); // Initialize the C ramdisk block device
+    vga_print("[BOOT] Block Devices initialized.\n");
+    vga_print("[DEBUG] Block device init complete\n");
+    serial_write("[DEBUG] Block device init complete\n");
 
-    // STEP 12: Network
+    // Add more debug before VFS or Rust
+    vga_print("[DEBUG] About to init VFS or call Rust\n");
+    serial_write("[DEBUG] About to init VFS or call Rust\n");
+
+    // Network
     rtl8139_init();
     vga_print("[BOOT] RTL8139 network driver initialized\n");
     serial_write("[BOOT] RTL8139 network driver initialized\n");
@@ -192,33 +190,66 @@ void kernel_main(uint64_t mb2_info_ptr) {
     net_init(ip);
     vga_print("[BOOT] Network stack (UDP/IP) initialized\n");
 
-    // STEP 13: Multitasking
+    // Multitasking
     vga_print("[BOOT] About to initialize multitasking...\n");
     serial_write("[BOOT] About to initialize multitasking...\n");
-    task_init();
-    vga_print("[BOOT] Task system initialized\n");
-    serial_write("[BOOT] Task system initialized\n");
-    task_create(demo_task1);
-    vga_print("[BOOT] Demo task 1 created\n");
-    serial_write("[BOOT] Demo task 1 created\n");
-    task_create(demo_task2);
-    vga_print("[BOOT] Demo task 2 created\n");
-    serial_write("[BOOT] Demo task 2 created\n");
-    vga_print("[BOOT] Multitasking demo: running two tasks\n");
-    serial_write("[BOOT] Multitasking demo: running two tasks\n");
     
-    // Temporarily skip multitasking to test shell
-    vga_print("[BOOT] Skipping multitasking for now...\n");
-    serial_write("[BOOT] Skipping multitasking for now...\n");
+    vga_print("[BOOT] TEMPORARILY DISABLED: task_init()...\n");
+    serial_write("[BOOT] TEMPORARILY DISABLED: task_init()...\n");
+    // task_init();
+    // vga_print("[BOOT] Task system initialized\n");
+    // serial_write("[BOOT] Task system initialized\n");
     
-    // STEP 14: Shell
+    // vga_print("[BOOT] Creating demo task 1...\n");
+    // serial_write("[BOOT] Creating demo task 1...\n");
+    // task_create(demo_task1);
+    // vga_print("[BOOT] Demo task 1 created\n");
+    // serial_write("[BOOT] Demo task 1 created\n");
+    
+    // vga_print("[BOOT] Creating demo task 2...\n");
+    // serial_write("[BOOT] Creating demo task 2...\n");
+    // task_create(demo_task2);
+    // vga_print("[BOOT] Demo task 2 created\n");
+    // serial_write("[BOOT] Demo task 2 created\n");
+    
+    // vga_print("[BOOT] Multitasking demo: running two tasks\n");
+    // serial_write("[BOOT] Multitasking demo: running two tasks\n");
+    
+    // Call the Rust entry point (which now initializes Rust VFS)
+    vga_print("[BOOT] About to call Rust entry point...\n");
+    serial_write("[BOOT] About to call Rust entry point...\n");
+    
+    // Add more debugging before the call
+    vga_print("[BOOT] Getting ready to call rust_entry_point...\n");
+    serial_write("[BOOT] Getting ready to call rust_entry_point...\n");
+    
+    // Test if we can call a simple function first
+    vga_print("[BOOT] Testing function call capability...\n");
+    serial_write("[BOOT] Testing function call capability...\n");
+    
+    rust_entry_point();
+    
+    vga_print("[BOOT] Successfully returned from Rust entry point.\n");
+    serial_write("[BOOT] Successfully returned from Rust entry point.\n");
+    
+    // VFS
+    // vga_print("[BOOT] Initializing VFS...\n");
+    // serial_write("[BOOT] Initializing VFS...\n");
+    // vfs_init();
+    vga_print("[BOOT] Calling Rust VFS init...\n");
+    serial_write("[BOOT] Calling Rust VFS init...\n");
+    rust_vfs_init();
+    vga_print("[BOOT] Returned from Rust VFS init.\n");
+    serial_write("[BOOT] Returned from Rust VFS init.\n");
+
+    // Shell
     vga_print("[BOOT] Initializing shell...\n");
     serial_write("[BOOT] Initializing shell...\n");
     shell_init();
     vga_print("[BOOT] Shell initialized\n");
     serial_write("[BOOT] Shell initialized\n");
     
-    // STEP 15: Syscalls
+    // SSyscalls
     vga_print("[BOOT] Initializing syscalls...\n");
     serial_write("[BOOT] Initializing syscalls...\n");
     syscall_init();

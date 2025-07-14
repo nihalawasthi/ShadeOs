@@ -1,4 +1,3 @@
-#!/bin/zsh
 # verify.sh - Quick environment verification
 
 set -e
@@ -22,6 +21,8 @@ check_tool "nasm"
 check_tool "qemu-system-x86_64"
 check_tool "grub-mkrescue"
 check_tool "xorriso"
+check_tool "cargo" # Added Rust cargo check
+check_tool "rustc" # Added Rust compiler check
 
 if [[ $ERRORS -eq 0 ]]; then
     echo "✅ All tools available"

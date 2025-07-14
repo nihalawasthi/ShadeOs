@@ -1,4 +1,3 @@
-// kernel/memory.c - Basic memory management
 #include "kernel.h"
 #include <stdarg.h>
 
