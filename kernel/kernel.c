@@ -194,44 +194,28 @@ void kernel_main(uint64_t mb2_info_ptr) {
     vga_print("[BOOT] About to initialize multitasking...\n");
     serial_write("[BOOT] About to initialize multitasking...\n");
     
-    vga_print("[BOOT] TEMPORARILY DISABLED: task_init()...\n");
-    serial_write("[BOOT] TEMPORARILY DISABLED: task_init()...\n");
-    // task_init();
-    // vga_print("[BOOT] Task system initialized\n");
-    // serial_write("[BOOT] Task system initialized\n");
-    
-    // vga_print("[BOOT] Creating demo task 1...\n");
-    // serial_write("[BOOT] Creating demo task 1...\n");
-    // task_create(demo_task1);
-    // vga_print("[BOOT] Demo task 1 created\n");
-    // serial_write("[BOOT] Demo task 1 created\n");
-    
-    // vga_print("[BOOT] Creating demo task 2...\n");
-    // serial_write("[BOOT] Creating demo task 2...\n");
-    // task_create(demo_task2);
-    // vga_print("[BOOT] Demo task 2 created\n");
-    // serial_write("[BOOT] Demo task 2 created\n");
-    
-    // vga_print("[BOOT] Multitasking demo: running two tasks\n");
-    // serial_write("[BOOT] Multitasking demo: running two tasks\n");
-    
-    // Call the Rust entry point (which now initializes Rust VFS)
-    vga_print("[BOOT] About to call Rust entry point...\n");
-    serial_write("[BOOT] About to call Rust entry point...\n");
-    
-    // Add more debugging before the call
-    vga_print("[BOOT] Getting ready to call rust_entry_point...\n");
-    serial_write("[BOOT] Getting ready to call rust_entry_point...\n");
-    
-    // Test if we can call a simple function first
-    vga_print("[BOOT] Testing function call capability...\n");
-    serial_write("[BOOT] Testing function call capability...\n");
-    
-    rust_entry_point();
-    
-    vga_print("[BOOT] Successfully returned from Rust entry point.\n");
-    serial_write("[BOOT] Successfully returned from Rust entry point.\n");
-    
+    task_init();
+    vga_print("[BOOT] Task system initialized\n");
+    serial_write("[BOOT] Task system initialized\n");
+
+    // Minimal user process that triggers syscalls
+    void user_process() {
+        sys_write("[USER] Hello from user mode!\n");
+        sys_exit();
+        while (1) {} // Should not reach here
+    }
+    // Allocate user stack (page-aligned, 16KB)
+    static uint8_t user_stack[16384] __attribute__((aligned(4096)));
+    task_create_user(user_process, user_stack, sizeof(user_stack), 0);
+    vga_print("[BOOT] User process created\n");
+    serial_write("[BOOT] User process created\n");
+
+    // Initialize and run the shell after user process creation
+    vga_print("[BOOT] Initializing shell...\n");
+    serial_write("[BOOT] Initializing shell...\n");
+    shell_init();
+    vga_print("[BOOT] Shell initialized\n");
+    serial_write("[BOOT] Shell initialized\n");
     // VFS
     // vga_print("[BOOT] Initializing VFS...\n");
     // serial_write("[BOOT] Initializing VFS...\n");
@@ -243,11 +227,11 @@ void kernel_main(uint64_t mb2_info_ptr) {
     serial_write("[BOOT] Returned from Rust VFS init.\n");
 
     // Shell
-    vga_print("[BOOT] Initializing shell...\n");
-    serial_write("[BOOT] Initializing shell...\n");
-    shell_init();
-    vga_print("[BOOT] Shell initialized\n");
-    serial_write("[BOOT] Shell initialized\n");
+    // vga_print("[BOOT] Initializing shell...\n");
+    // serial_write("[BOOT] Initializing shell...\n");
+    // shell_init();
+    // vga_print("[BOOT] Shell initialized\n");
+    // serial_write("[BOOT] Shell initialized\n");
     
     // SSyscalls
     vga_print("[BOOT] Initializing syscalls...\n");
@@ -257,6 +241,7 @@ void kernel_main(uint64_t mb2_info_ptr) {
     serial_write("[BOOT] Syscalls initialized\n");
     
     // Start the shell
+    
     vga_print("[BOOT] Starting shell...\n");
     serial_write("[BOOT] Starting shell...\n");
     shell_run();

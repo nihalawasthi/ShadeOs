@@ -8,7 +8,7 @@
 #define PDE_ENTRIES 512
 #define PTE_ENTRIES 512
 
-static uint64_t* pml4_table = 0;
+uint64_t* pml4_table = 0;
 
 static inline uint64_t* get_table(uint64_t phys_addr) {
     return (uint64_t*)(phys_addr);
@@ -96,4 +96,43 @@ uint64_t get_phys_addr(uint64_t virt_addr) {
     uint64_t* pt = get_table(pd[get_pd_index(virt_addr)] & ~0xFFFULL);
     if (!pt) return 0;
     return pt[get_pt_index(virt_addr)] & ~0xFFFULL;
+} 
+
+void map_user_page(uint64_t virt_addr, uint64_t phys_addr) {
+    map_page(virt_addr, phys_addr, PAGE_PRESENT | PAGE_RW | PAGE_USER);
+} 
+
+// Create a new PML4 for a user process, mapping kernel memory
+uint64_t paging_new_pml4() {
+    uint64_t* new_pml4 = (uint64_t*)alloc_page();
+    if (!new_pml4) return 0;
+    memset(new_pml4, 0, PAGE_SIZE);
+    // Map kernel memory (copy kernel PML4 entries for higher half)
+    extern uint64_t* pml4_table;
+    for (int i = 256; i < 512; i++) {
+        new_pml4[i] = pml4_table[i];
+    }
+    // Optionally: map user stack/code here
+    return (uint64_t)new_pml4;
+}
+
+void paging_free_pml4(uint64_t pml4_phys) {
+    // For now, just free the PML4 page itself
+    free_page((void*)pml4_phys);
+    // TODO: Free all page tables recursively
+} 
+
+// FFI wrappers for Rust
+uint64_t rust_paging_new_pml4() {
+    return paging_new_pml4();
+}
+void rust_paging_free_pml4(uint64_t pml4_phys) {
+    paging_free_pml4(pml4_phys);
+}
+void rust_map_page(uint64_t pml4_phys, uint64_t virt, uint64_t phys, uint64_t flags) {
+    // Temporarily switch pml4_table to the target, map, then restore
+    uint64_t* old_pml4 = pml4_table;
+    pml4_table = (uint64_t*)pml4_phys;
+    map_page(virt, phys, flags);
+    pml4_table = old_pml4;
 } 

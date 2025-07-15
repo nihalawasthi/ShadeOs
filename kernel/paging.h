@@ -17,5 +17,18 @@ void paging_init();
 void map_page(uint64_t virt_addr, uint64_t phys_addr, uint64_t flags);
 void unmap_page(uint64_t virt_addr);
 uint64_t get_phys_addr(uint64_t virt_addr);
+void map_user_page(uint64_t virt_addr, uint64_t phys_addr);
+uint64_t paging_new_pml4();
+void paging_free_pml4(uint64_t pml4_phys);
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+uint64_t rust_paging_new_pml4();
+void rust_paging_free_pml4(uint64_t pml4_phys);
+void rust_map_page(uint64_t pml4_phys, uint64_t virt, uint64_t phys, uint64_t flags);
+#ifdef __cplusplus
+}
+#endif
 
 #endif 

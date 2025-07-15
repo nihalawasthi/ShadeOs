@@ -15,10 +15,9 @@ void pkg_init() {
 int pkg_install(const char* name, const char* data, int size) {
     if (!pkgs_dir) return -1;
     if (vfs_find(name, pkgs_dir)) return -1; // already exists
-    vfs_node_t* node = vfs_create(name, VFS_TYPE_MEM, pkgs_dir);
+    vfs_node_t* node = vfs_create(name, VFS_TYPE_FILE, pkgs_dir);
     if (!node) return -1;
     node->size = 0;
-    node->pos = 0;
     vfs_write(node, data, size);
     return 0;
 }

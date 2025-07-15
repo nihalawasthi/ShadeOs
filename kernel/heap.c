@@ -106,10 +106,11 @@ static void split_block(heap_block_t* block, size_t size) {
 }
 
 void* kmalloc(size_t size) {
+    void* ptr = rust_kmalloc(size);
+    if (ptr) return ptr;
+    // fallback to C heap if Rust fails
   if (size == 0) return NULL;
-  // Log allocation request
   serial_write("[HEAP] kmalloc request: ");
-  // Print size in hex
   char size_hex[17];
   for (int i = 0; i < 16; i++) {
       int nibble = (size >> ((15 - i) * 4)) & 0xF;
@@ -118,14 +119,12 @@ void* kmalloc(size_t size) {
   size_hex[16] = 0;
   serial_write(size_hex);
   serial_write("\n");
-
   heap_block_t* block = heap_head;
   while (block) {
       if (block->free && block->size >= size) {
           split_block(block, size);
           block->free = 0;
           void* ret = (void*)((uint8_t*)block + sizeof(heap_block_t));
-          // Log returned address
           serial_write("[HEAP] kmalloc returns: 0x");
           char addr_hex[17];
           uint64_t addr = (uint64_t)ret;
@@ -141,7 +140,6 @@ void* kmalloc(size_t size) {
       if (!block->next) break;
       block = block->next;
   }
-  // Need to grow heap
   uint64_t old_end = heap_end;
   uint64_t new_end = old_end + ((size + sizeof(heap_block_t) + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1));
   if (new_end - HEAP_START > HEAP_MAX_SIZE) return NULL;
@@ -156,7 +154,6 @@ void* kmalloc(size_t size) {
   heap_end = new_end;
   split_block(new_block, size);
   void* ret = (void*)((uint8_t*)new_block + sizeof(heap_block_t));
-  // Log returned address
   serial_write("[HEAP] kmalloc returns: 0x");
   char addr_hex2[17];
   uint64_t addr2 = (uint64_t)ret;
@@ -171,10 +168,11 @@ void* kmalloc(size_t size) {
 }
 
 void kfree(void* ptr) {
+    rust_kfree(ptr);
+    // Optionally, also free in C heap if needed
   if (!ptr) return;
   heap_block_t* block = (heap_block_t*)((uint8_t*)ptr - sizeof(heap_block_t));
   block->free = 1;
-  // Merge adjacent free blocks
   heap_block_t* cur = heap_head;
   while (cur && cur->next) {
       if (cur->free && cur->next->free) {

@@ -61,5 +61,12 @@ extern int rust_vfs_ls(const char* path);
 extern int rust_vfs_read(const char* path, void* buf, int max_len);
 extern int rust_vfs_write(const char* path, const void* buf, int len);
 extern int rust_vfs_mkdir(const char* path);
+extern int rust_vfs_create_file(const char* path);
+extern int rust_vfs_unlink(const char* path);
+extern int rust_vfs_stat(const char* path, void* stat_out);
+
+// --- Rust Keyboard FFI Declarations ---
+extern void rust_keyboard_put_scancode(uint8_t scancode);
+extern int rust_keyboard_get_char(); // Returns char or -1 if no data
 
 #endif

@@ -2,6 +2,7 @@
 #include "kernel.h"
 #include "idt.h"
 #include "serial.h"
+#include "syscall.h"
 
 struct idt_entry {
     uint16_t base_low;
@@ -75,6 +76,9 @@ void idt_init() {
         }
     }
     serial_write("[IDT] All gates set\n");
+    // Set syscall gate (int 0x80) to syscall_entry
+    extern void syscall_entry();
+    idt_set_gate(0x80, (uint64_t)syscall_entry, 0x08, 0xEE);
     
     serial_write("[IDT] About to call idt_flush\n");
     idt_flush((uint64_t)&idt_pointer);
@@ -105,7 +109,19 @@ void isr_handler(uint64_t int_no, uint64_t err_code) {
         vga_set_color(0x0F);
     }
     if (int_no == 14) {
+        // Page Fault
+        uint64_t cr2;
+        __asm__ volatile ("mov %%cr2, %0" : "=r"(cr2));
         serial_write("[INTERRUPT] Page Fault detected!\n");
+        serial_write("[INTERRUPT] Faulting address: 0x");
+        char addr_hex[17];
+        for (int i = 0; i < 16; i++) {
+            int nibble = (cr2 >> ((15 - i) * 4)) & 0xF;
+            addr_hex[i] = (nibble < 10) ? ('0' + nibble) : ('A' + nibble - 10);
+        }
+        addr_hex[16] = 0;
+        serial_write(addr_hex);
+        serial_write("\n");
         serial_write("[INTERRUPT] Error code: ");
         char err_hex[17];
         for (int i = 0; i < 16; i++) {
@@ -118,6 +134,17 @@ void isr_handler(uint64_t int_no, uint64_t err_code) {
         vga_set_color(0x0C);
         vga_print("[INTERRUPT] Page Fault Exception!\n");
         vga_set_color(0x0F);
+        // Check if fault from user mode (CS & 3 == 3)
+        uint64_t cs;
+        __asm__ volatile ("mov %%cs, %0" : "=r"(cs));
+        if ((cs & 3) == 3) {
+            vga_print("[PAGE FAULT] User process caused page fault. Killing process.\n");
+            serial_write("[PAGE FAULT] User process killed.\n");
+            extern void task_exit();
+            task_exit();
+            return;
+        }
+        // Kernel mode: panic
         while(1) { __asm__ volatile("hlt"); }
     }
     if (int_no == 32) {

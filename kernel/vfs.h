@@ -2,28 +2,24 @@
 #define VFS_H
 
 #include "kernel.h"
+#include <stdint.h>
 
 #define MAX_FILE_NAME 256
 
-// File types (might still be useful for shell logic, but actual VFS is Rust-managed)
-#define VFS_TYPE_MEM 1
-#define VFS_TYPE_DIR 2
-#define VFS_TYPE_FAT 3
+// File types
+#define VFS_TYPE_UNUSED 0
+#define VFS_TYPE_DIR 1
+#define VFS_TYPE_FILE 2
 
-// Simplified vfs_node_t for compatibility, but actual file system state is in Rust
-// This struct is now primarily a placeholder for the C shell's internal logic
-// and will not directly represent file system nodes managed by Rust.
+// FFI-compatible vfs_node_t (matches Rust VfsNode)
 typedef struct vfs_node {
-    char name[MAX_FILE_NAME];
-    int type;
-    int size;
-    int pos;
-    int used; // Indicates if this entry in the C-side 'nodes' array is in use
-    void* data; // For VFS_TYPE_MEM, if we keep that concept
+    uint8_t used;
+    uint8_t node_type;
+    char name[32];
+    uint32_t size;
     struct vfs_node* parent;
     struct vfs_node* child;
     struct vfs_node* sibling;
-    char fat_filename[12]; // No longer directly used by Rust VFS
 } vfs_node_t;
 
 // These functions will now call into the Rust VFS
@@ -43,5 +39,9 @@ extern int rust_vfs_mkdir(const char* path);
 extern int rust_vfs_ls(const char* path);
 extern int rust_vfs_read(const char* path, void* buf, int max_len);
 extern int rust_vfs_write(const char* path, const void* buf, int len);
+extern void* rust_vfs_get_root();
+extern int rust_vfs_create_file(const char* path);
+extern int rust_vfs_unlink(const char* path);
+extern int rust_vfs_stat(const char* path, void* stat_out);
 
 #endif

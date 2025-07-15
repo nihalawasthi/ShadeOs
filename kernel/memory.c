@@ -1,4 +1,5 @@
 #include "kernel.h"
+#include "string.h"
 #include <stdarg.h>
 
 static uint8_t* heap_start = (uint8_t*)0x100000; // 1MB
@@ -15,6 +16,8 @@ void memory_init() {
 
 // Robust memset for kernel: no inlining, no alignment assumptions
 __attribute__((noinline)) void* memset(void* dest, int val, size_t len) {
+    void* r = rust_memset(dest, val, len);
+    if (r) return r;
     volatile uint8_t* d = (volatile uint8_t*)dest;
     for (size_t i = 0; i < len; i++) {
         d[i] = (uint8_t)val;
@@ -23,6 +26,8 @@ __attribute__((noinline)) void* memset(void* dest, int val, size_t len) {
 }
 
 void* memcpy(void* dest, const void* src, size_t len) {
+    void* r = rust_memcpy(dest, src, len);
+    if (r) return r;
     uint8_t* d = (uint8_t*)dest;
     const uint8_t* s = (const uint8_t*)src;
     for (size_t i = 0; i < len; i++) {
@@ -70,6 +75,17 @@ void outl(uint16_t port, uint32_t data) {
 int strcmp(const char* a, const char* b) {
     while (*a && (*a == *b)) { a++; b++; }
     return *(const unsigned char*)a - *(const unsigned char*)b;
+}
+
+char* strncpy(char* dest, const char* src, size_t n) {
+    size_t i;
+    for (i = 0; i < n && src[i] != '\0'; i++) {
+        dest[i] = src[i];
+    }
+    for (; i < n; i++) {
+        dest[i] = '\0';
+    }
+    return dest;
 }
 
 int memcmp(const void* s1, const void* s2, size_t n) {

@@ -4,6 +4,7 @@
 #include "serial.h"
 #include "gdt.h"
 #include "timer.h"
+#include "paging.h"
 
 static task_t tasks[MAX_TASKS];
 static int num_tasks = 0;
@@ -12,6 +13,7 @@ static int scheduler_running = 0;
 static int current_task_index = 0;
 
 extern void task_switch(uint64_t* old_rsp, uint64_t new_rsp);
+extern uint64_t* pml4_table;
 
 void task_init() {
     for (int i = 0; i < MAX_TASKS; i++) tasks[i].state = TASK_TERMINATED;
@@ -32,6 +34,8 @@ int task_create(void (*entry)(void)) {
             uint64_t* stack_top = (uint64_t*)(tasks[i].stack + TASK_STACK_SIZE);
             *(--stack_top) = (uint64_t)entry; // Return address (RIP)
             tasks[i].rsp = (uint64_t)stack_top;
+            // Use kernel's PML4
+            tasks[i].cr3 = (uint64_t)pml4_table;
             // Add to round-robin list
             if (!current) {
                 current = &tasks[i];
@@ -68,6 +72,8 @@ int task_create_user(void (*entry)(void), void* user_stack, int stack_size, void
             tasks[i].rip = (uint64_t)entry;
             tasks[i].user_mode = 1;
             setup_user_stack_frame(&tasks[i], entry, user_stack, stack_size);
+            // Allocate a new PML4 for this user process
+            tasks[i].cr3 = paging_new_pml4();
             // Add to round-robin list
             if (!current) {
                 current = &tasks[i];
@@ -118,6 +124,15 @@ __attribute__((naked)) void task_switch(uint64_t* old_rsp, uint64_t new_rsp) {
     __asm__ volatile (
         "movq %rsp, (%rdi)\n"
         "movq %rsi, %rsp\n"
+        // Load new CR3 if needed
+        "movq current, %rax\n"
+        "movq (%rax), %rbx\n" // current task pointer
+        "movq %cr3, %rcx\n"
+        "cmpq 0x38(%rbx), %rcx\n" // offset of cr3 in task_t
+        "je 1f\n"
+        "movq 0x38(%rbx), %rcx\n"
+        "movq %rcx, %cr3\n"
+        "1:\n"
         "ret\n"
     );
 }
@@ -175,4 +190,5 @@ void task_schedule() {
 void timer_task_handler() {
     // For now, just use cooperative multitasking
     // Preemptive scheduling can be added later
+    rust_scheduler_tick();
 } 

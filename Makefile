@@ -5,8 +5,8 @@ LD = x86_64-elf-ld
 CFLAGS = -ffreestanding -fno-pie -nostdlib -mno-red-zone -Wall -Wextra -std=c11 -O2 -Ikernel
 ASFLAGS = -f elf64
 
-KERNEL_SOURCES = kernel/kernel.c kernel/vga.c kernel/gdt.c kernel/idt.c kernel/memory.c kernel/multiboot.c kernel/pmm.c kernel/paging.c kernel/heap.c kernel/timer.c kernel/keyboard.c kernel/serial.c kernel/shell.c kernel/pkg.c kernel/rtl8139.c kernel/net.c kernel/task.c kernel/syscall.c kernel/fat.c kernel/blockdev.c
-KERNEL_OBJECTS = kernel/kernel.o kernel/vga.o kernel/gdt.o kernel/idt.o kernel/memory.o kernel/multiboot.o kernel/pmm.o kernel/paging.o kernel/heap.o kernel/timer.o kernel/keyboard.o kernel/serial.o kernel/shell.o kernel/pkg.o kernel/rtl8139.o kernel/net.o kernel/task.o kernel/syscall.o kernel/fat.o kernel/blockdev.o kernel/vfs_stubs.o
+KERNEL_SOURCES = kernel/kernel.c kernel/vga.c kernel/gdt.c kernel/idt.c kernel/memory.c kernel/multiboot.c kernel/pmm.c kernel/paging.c kernel/heap.c kernel/timer.c kernel/keyboard.c kernel/serial.c kernel/shell.c kernel/pkg.c kernel/rtl8139.c kernel/net.c kernel/task.c kernel/syscall.c kernel/fat.c kernel/blockdev.c kernel/helpers.c
+KERNEL_OBJECTS = kernel/kernel.o kernel/vga.o kernel/gdt.o kernel/idt.o kernel/memory.o kernel/multiboot.o kernel/pmm.o kernel/paging.o kernel/heap.o kernel/timer.o kernel/keyboard.o kernel/serial.o kernel/shell.o kernel/pkg.o kernel/rtl8139.o kernel/net.o kernel/task.o kernel/syscall.o kernel/fat.o kernel/blockdev.o kernel/vfs_stubs.o kernel/helpers.o
 
 # Rust specific variables
 RUST_TARGET = x86_64-unknown-none
@@ -64,47 +64,7 @@ $(RUST_LIB):
 	@echo '[dependencies]' >> kernel-rs/Cargo.toml
 	@mkdir -p kernel-rs/src
 	@if [ ! -f kernel-rs/src/lib.rs ]; then \
-		echo '#![no_std] // Don'\''t link the Rust standard library' > kernel-rs/src/lib.rs; \
-		echo '#![no_main] // Disable the default main function' >> kernel-rs/src/lib.rs; \
-		echo '' >> kernel-rs/src/lib.rs; \
-		echo 'use core::panic::PanicInfo;' >> kernel-rs/src/lib.rs; \
-		echo '' >> kernel-rs/src/lib.rs; \
-		echo '// Define C functions that Rust will call' >> kernel-rs/src/lib.rs; \
-		echo 'extern "C" {' >> kernel-rs/src/lib.rs; \
-		echo '    fn vga_print(s: *const u8);' >> kernel-rs/src/lib.rs; \
-		echo '    fn serial_write(s: *const u8);' >> kernel-rs/src/lib.rs; \
-		echo '}' >> kernel-rs/src/lib.rs; \
-		echo '' >> kernel-rs/src/lib.rs; \
-		echo 'mod vfs;' >> kernel-rs/src/lib.rs; \
-		echo 'pub use vfs::*;' >> kernel-rs/src/lib.rs; \
-		echo '' >> kernel-rs/src/lib.rs; \
-		echo '// Force emission of FFI functions for C linkage' >> kernel-rs/src/lib.rs; \
-		echo '#[used]' >> kernel-rs/src/lib.rs; \
-		echo 'static _KEEP_FFI: [&'\''static (dyn Sync + Send); 4] = [' >> kernel-rs/src/lib.rs; \
-		echo '    &rust_vfs_mkdir,' >> kernel-rs/src/lib.rs; \
-		echo '    &rust_vfs_ls,' >> kernel-rs/src/lib.rs; \
-		echo '    &rust_vfs_read,' >> kernel-rs/src/lib.rs; \
-		echo '    &rust_vfs_write,' >> kernel-rs/src/lib.rs; \
-		echo '];' >> kernel-rs/src/lib.rs; \
-		echo '' >> kernel-rs/src/lib.rs; \
-		echo '// A simple panic handler for bare-metal' >> kernel-rs/src/lib.rs; \
-		echo '#[panic_handler]' >> kernel-rs/src/lib.rs; \
-		echo 'fn panic(_info: &PanicInfo) -> ! {' >> kernel-rs/src/lib.rs; \
-		echo '    unsafe {' >> kernel-rs/src/lib.rs; \
-		echo '        serial_write(b"[RUST PANIC] Kernel panicked!\n\0".as_ptr());' >> kernel-rs/src/lib.rs; \
-		echo '        vga_print(b"[RUST PANIC] Kernel panicked!\n\0".as_ptr());' >> kernel-rs/src/lib.rs; \
-		echo '    }' >> kernel-rs/src/lib.rs; \
-		echo '    loop {}' >> kernel-rs/src/lib.rs; \
-		echo '}' >> kernel-rs/src/lib.rs; \
-		echo '' >> kernel-rs/src/lib.rs; \
-		echo '// This function will be called from C' >> kernel-rs/src/lib.rs; \
-		echo '#[no_mangle]' >> kernel-rs/src/lib.rs; \
-		echo 'pub extern "C" fn rust_entry_point() {' >> kernel-rs/src/lib.rs; \
-		echo '    unsafe {' >> kernel-rs/src/lib.rs; \
-		echo '        vga_print(b"[RUST] Hello from Rust!\n\0".as_ptr());' >> kernel-rs/src/lib.rs; \
-		echo '        serial_write(b"[RUST] Hello from Rust!\n\0".as_ptr());' >> kernel-rs/src/lib.rs; \
-		echo '    }' >> kernel-rs/src/lib.rs; \
-		echo '}' >> kernel-rs/src/lib.rs; \
+		cp kernel-rs/src/lib.rs.template kernel-rs/src/lib.rs; \
 	fi
 	cargo build --target $(RUST_TARGET) --$(RUST_PROFILE) --manifest-path kernel-rs/Cargo.toml
 

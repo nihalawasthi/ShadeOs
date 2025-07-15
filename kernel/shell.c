@@ -20,21 +20,58 @@ static vfs_node_t* cwd = 0; // This will now be a C-side vfs_node_t representing
 
 // Fallback root node for when vfs_get_root() returns NULL
 static vfs_node_t fallback_root = {
-    .name = "/",
-    .type = VFS_TYPE_DIR,
-    .size = 0,
-    .pos = 0,
     .used = 1,
-    .data = NULL,
+    .node_type = VFS_TYPE_DIR,
+    .name = "/",
+    .size = 0,
     .parent = NULL,
     .child = NULL,
-    .sibling = NULL,
-    .fat_filename = ""
+    .sibling = NULL
 };
+
+// Replace print_ptr with a simple hex print
+static void print_hex_digit(unsigned char d) {
+    if (d < 10) vga_putchar('0' + d), serial_write((char[]){'0' + d, 0});
+    else vga_putchar('A' + (d - 10)), serial_write((char[]){'A' + (d - 10), 0});
+}
+
+static void print_hex_ptr(const char* label, void* ptr) {
+    vga_print(label);
+    serial_write(label);
+    vga_print(": 0x");
+    serial_write(": 0x");
+    unsigned long val = (unsigned long)ptr;
+    for (int i = (sizeof(unsigned long) * 2) - 1; i >= 0; i--) {
+        unsigned char d = (val >> (i * 4)) & 0xF;
+        char c = (d < 10) ? ('0' + d) : ('A' + (d - 10));
+        vga_putchar(c);
+        serial_write((char[]){c, 0});
+    }
+    vga_print("\n");
+    serial_write("\n");
+}
 
 static void shell_prompt() {
     vga_set_color(0x0A);
-    vga_print(cwd ? cwd->name : "/"); // Show current directory name
+    // REMOVED DEBUG PRINTS: print_hex_ptr("[DEBUG] shell_prompt: cwd", cwd);
+    if (!cwd) {
+        vga_print("[ERR: cwd NULL] ");
+        vga_set_color(0x0F);
+        return;
+    }
+    // REMOVED DEBUG PRINTS: vga_print("[DEBUG] cwd->name bytes: ");
+    // REMOVED DEBUG PRINTS: serial_write("[DEBUG] cwd->name bytes: ");
+    // REMOVED DEBUG PRINTS: for (int i = 0; i < 32; i++) {
+    // REMOVED DEBUG PRINTS:     unsigned char c = ((unsigned char*)cwd->name)[i];
+    // REMOVED DEBUG PRINTS:     char hex[3] = {"0123456789ABCDEF"[c >> 4], "0123456789ABCDEF"[c & 0xF], 0};
+    // REMOVED DEBUG PRINTS:     vga_print(hex);
+    // REMOVED DEBUG PRINTS:     serial_write(hex);
+    // REMOVED DEBUG PRINTS:     vga_putchar(' ');
+    // REMOVED DEBUG PRINTS:     serial_write(" ");
+    // REMOVED DEBUG PRINTS: }
+    // REMOVED DEBUG PRINTS: vga_print("\n");
+    // REMOVED DEBUG PRINTS: serial_write("\n");
+    vga_print(cwd->name); // Show current directory name
     vga_print(" > ");
     vga_set_color(0x0F);
 }
@@ -54,9 +91,14 @@ static void shell_help() {
     vga_print("  echo    - Print text\n");
     vga_print("  pkg     - Package manager (install, remove, list, info)\n");
     vga_print("  wget    - Download file via UDP\n");
+    vga_print("  touch   - Create empty file\n");
+    vga_print("  rm      - Remove file/directory\n");
+    vga_print("  stat    - Get file/directory info\n");
 }
 
 static void shell_ls(const char* arg) {
+    // REMOVED DEBUG PRINTS: print_hex_ptr("[DEBUG] shell_ls: cwd", cwd);
+    if (!cwd) { vga_print("[ERR: cwd NULL]\n"); return; }
     char full_path[256];
     if (!arg || !*arg || strcmp(arg, ".") == 0) {
         // List current directory
@@ -79,7 +121,7 @@ static void shell_ls(const char* arg) {
     
     // Call Rust VFS ls
     vga_print(full_path);
-    vga_print("\n");
+    vga_print(":\n");
     int result = rust_vfs_ls(full_path);
     if (result != 0) {
         vga_print("ls: Failed to list directory.\n");
@@ -143,27 +185,98 @@ static void shell_mkdir(const char* arg) {
     }
 }
 
+static void shell_touch(const char* arg) {
+    if (!arg || !*arg) {
+        vga_print("touch: missing operand\n");
+        return;
+    }
+    char full_path[256];
+    if (arg[0] == '/') {
+        snprintf(full_path, sizeof(full_path), "%s", arg);
+    } else {
+        snprintf(full_path, sizeof(full_path), "%s%s%s", cwd->name, (strcmp(cwd->name, "/") == 0) ? "" : "/", arg);
+    }
+    int res = rust_vfs_create_file(full_path);
+    if (res == 0) vga_print("touch: file created\n");
+    else if (res == -17) vga_print("touch: file exists\n");
+    else if (res == -28) vga_print("touch: no space\n");
+    else vga_print("touch: failed\n");
+}
+
+static void shell_rm(const char* arg) {
+    if (!arg || !*arg) {
+        vga_print("rm: missing operand\n");
+        return;
+    }
+    char full_path[256];
+    if (arg[0] == '/') {
+        snprintf(full_path, sizeof(full_path), "%s", arg);
+    } else {
+        snprintf(full_path, sizeof(full_path), "%s%s%s", cwd->name, (strcmp(cwd->name, "/") == 0) ? "" : "/", arg);
+    }
+    int res = rust_vfs_unlink(full_path);
+    if (res == 0) vga_print("rm: deleted\n");
+    else if (res == -2) vga_print("rm: not found\n");
+    else vga_print("rm: failed\n");
+}
+
+static void shell_stat(const char* arg) {
+    // REMOVED DEBUG PRINTS: print_hex_ptr("[DEBUG] shell_stat: cwd", cwd);
+    if (!cwd) { vga_print("[ERR: cwd NULL]\n"); return; }
+    if (!arg || !*arg) {
+        vga_print("stat: missing operand\n");
+        return;
+    }
+    char full_path[256];
+    if (arg[0] == '/') {
+        snprintf(full_path, sizeof(full_path), "%s", arg);
+    } else {
+        snprintf(full_path, sizeof(full_path), "%s%s%s", cwd->name, (strcmp(cwd->name, "/") == 0) ? "" : "/", arg);
+    }
+    vfs_node_t statbuf;
+    int res = rust_vfs_stat(full_path, &statbuf);
+    if (res == 0) {
+        vga_print("stat: name="); vga_print(statbuf.name); vga_print(", type=");
+        if (statbuf.node_type == 1) vga_print("dir\n");
+        else if (statbuf.node_type == 2) vga_print("file\n");
+        else vga_print("unknown\n");
+    } else if (res == -2) vga_print("stat: not found\n");
+    else vga_print("stat: failed\n");
+}
+
+// Update shell_cd to use rust_vfs_stat for directory check
 static void shell_cd(const char* arg) {
+    // REMOVED DEBUG PRINTS: print_hex_ptr("[DEBUG] shell_cd: cwd", cwd);
+    if (!cwd) { vga_print("[ERR: cwd NULL]\n"); return; }
     if (!arg || !*arg) {
         cwd = vfs_get_root();
         vga_print("cd: changed to root directory\n");
         return;
     }
-    
-    // For 'cd', we need to find the *C-side* node to update `cwd`.
-    // This means `vfs_find` needs to be able to locate nodes that exist in Rust VFS.
-    // For simplicity, we'll only allow `cd` to directories that are already
-    // represented in the C-side `nodes` array (e.g., the root, or those created
-    // via `vfs_create` if it were to track all Rust-created dirs).
-    // A more robust solution would involve `rust_vfs_stat` or similar to check if path is a directory.
-    
-    vfs_node_t* target_dir = vfs_find(arg, cwd); // This still uses the C-side lookup
-    if (!target_dir || target_dir->type != VFS_TYPE_DIR) {
-        vga_print("cd: No such directory or not a directory (C-side lookup only).\n");
-        return;
+    char full_path[256];
+    if (arg[0] == '/') {
+        snprintf(full_path, sizeof(full_path), "%s", arg);
+    } else {
+        snprintf(full_path, sizeof(full_path), "%s%s%s", cwd->name, (strcmp(cwd->name, "/") == 0) ? "" : "/", arg);
     }
-    cwd = target_dir;
-    vga_print("cd: changed directory\n");
+    vfs_node_t statbuf;
+    int res = rust_vfs_stat(full_path, &statbuf);
+    if (res == 0 && statbuf.node_type == VFS_TYPE_DIR) {
+        // For now, we can't dynamically get a C-side pointer to the Rust node
+        // So, we'll just update the CWD name for display purposes.
+        // A proper solution would involve Rust returning a stable ID or pointer.
+        // For simplicity, we'll just update the name in the CWD struct.
+        // This is a temporary workaround until a more robust C-Rust VFS integration.
+        strncpy(cwd->name, full_path, sizeof(cwd->name) - 1);
+        cwd->name[sizeof(cwd->name) - 1] = '\0';
+        vga_print("cd: changed directory to ");
+        vga_print(cwd->name);
+        vga_print("\n");
+    } else if (res == 0) {
+        vga_print("cd: not a directory\n");
+    } else {
+        vga_print("cd: not found\n");
+    }
 }
 
 static void shell_pkg(const char* arg) {
@@ -262,6 +375,9 @@ static void shell_wget(const char* arg) {
 }
 
 static void shell_exec(const char* cmd, const char* arg) {
+    serial_write("[SHELL] new command entered : ");
+    serial_write(cmd);
+    serial_write("\n");
     if (!strcmp(cmd, "help")) shell_help();
     else if (!strcmp(cmd, "clear")) shell_clear();
     else if (!strcmp(cmd, "ls")) shell_ls(arg);
@@ -269,6 +385,9 @@ static void shell_exec(const char* cmd, const char* arg) {
     else if (!strcmp(cmd, "echo")) shell_echo(arg);
     else if (!strcmp(cmd, "mkdir")) shell_mkdir(arg);
     else if (!strcmp(cmd, "cd")) shell_cd(arg);
+    else if (!strcmp(cmd, "touch")) shell_touch(arg);
+    else if (!strcmp(cmd, "rm")) shell_rm(arg);
+    else if (!strcmp(cmd, "stat")) shell_stat(arg);
     else if (!strcmp(cmd, "pkg") || !strcmp(cmd, "pacman") || !strcmp(cmd, "apt-get")) shell_pkg(arg);
     else if (!strcmp(cmd, "wget")) shell_wget(arg);
     else vga_print("Unknown command. Type 'help'.\n");
@@ -279,28 +398,42 @@ void shell_init() {
     input_len = 0;
     hist_count = 0;
     hist_pos = 0;
-    // vfs_init(); // Initialize the C-side VFS wrapper
+    vga_print("[SHELL] About to call rust_vfs_init...\n");
+    serial_write("[SHELL] About to call rust_vfs_init...\n");
     rust_vfs_init(); // Use Rust VFS instead
+    vga_print("[SHELL] rust_vfs_init completed\n");
+    serial_write("[SHELL] rust_vfs_init completed\n");
+    vga_print("[SHELL] About to call vfs_get_root...\n");
+    serial_write("[SHELL] About to call vfs_get_root...\n");
     cwd = vfs_get_root(); // Set CWD to root (C-side representation)
+    vga_print("[SHELL] vfs_get_root completed\n");
+    serial_write("[SHELL] vfs_get_root completed\n");
     if (!cwd) cwd = &fallback_root;
-    // pkg_init(); // Package manager init is now handled by shell_pkg directly
+    // REMOVED DEBUG PRINTS: print_hex_ptr("[DEBUG] shell_init: cwd", cwd);
     vga_print("[SHELL] Shell initialized\n");
     serial_write("[SHELL] Shell initialized\n");
 }
 
-void shell_run() {
-    vga_print("shell_run: Starting shell loop\n");
-    
+void shell_run() {    
     while (1) {
         shell_prompt();
+        // REMOVED DEBUG PRINTS: vga_print("[DEBUG] after shell_prompt\n");
+        // REMOVED DEBUG PRINTS: serial_write("[DEBUG] after shell_prompt\n");
         input_len = 0;
         memset(input_buf, 0, SHELL_INPUT_MAX);
         
         // Read line
+        // REMOVED DEBUG PRINTS: vga_print("[DEBUG] before read input\n");
+        // REMOVED DEBUG PRINTS: serial_write("[DEBUG] before read input\n");
+        if (!input_buf) {
+            vga_print("[ERR: input buffer NULL]\n");
+            serial_write("[ERR: input buffer NULL]\n");
+            continue;
+        }
         while (1) {
-            poll_keyboard_input();
-            int c = get_ascii_char();
-            if (c == -1) continue;
+            // poll_keyboard_input(); // This should NOT be here
+            int c = get_ascii_char(); // This now calls Rust and handles waiting
+            if (c == -1) continue; // Should not happen with blocking get_ascii_char
             if (c == '\n' || c == '\r') break;
             if (c == 8 && input_len > 0) { // Backspace
                 input_len--;
@@ -328,6 +461,51 @@ void shell_run() {
                 break;
             }
         }
+        // REMOVED DEBUG PRINTS: vga_print("[DEBUG] before exec command\n");
+        // REMOVED DEBUG PRINTS: serial_write("[DEBUG] before exec command\n");
         shell_exec(cmd, arg ? arg : "");
+        // REMOVED DEBUG PRINTS: vga_print("[DEBUG] after exec command\n");
+        // REMOVED DEBUG PRINTS: serial_write("[DEBUG] after exec command\n");
     }
+}
+
+// Add debug prints to shell_readline
+void shell_readline(char* buf, int maxlen) {
+    // REMOVED DEBUG PRINTS: vga_print("[DEBUG] entered shell_readline\n");
+    // REMOVED DEBUG PRINTS: serial_write("[DEBUG] entered shell_readline\n");
+    // REMOVED DEBUG PRINTS: vga_print("[DEBUG] shell_readline: buf ptr: ");
+    // REMOVED DEBUG PRINTS: serial_write("[DEBUG] shell_readline: buf ptr: ");
+    // REMOVED DEBUG PRINTS: print_hex_ptr("buf", buf);
+    // REMOVED DEBUG PRINTS: vga_print("[DEBUG] shell_readline: maxlen: ");
+    // REMOVED DEBUG PRINTS: serial_write("[DEBUG] shell_readline: maxlen: ");
+    // REMOVED DEBUG PRINTS: // Print maxlen as hex
+    // REMOVED DEBUG PRINTS: for (int i = (sizeof(int) * 2) - 1; i >= 0; i--) {
+    // REMOVED DEBUG PRINTS:     unsigned char d = (maxlen >> (i * 4)) & 0xF;
+    // REMOVED DEBUG PRINTS:     char c = (d < 10) ? ('0' + d) : ('A' + (d - 10));
+    // REMOVED DEBUG PRINTS:     vga_putchar(c);
+    // REMOVED DEBUG PRINTS:     serial_write((char[]){c, 0});
+    // REMOVED DEBUG PRINTS: }
+    // REMOVED DEBUG PRINTS: vga_print("\n");
+    // REMOVED DEBUG PRINTS: serial_write("\n");
+    if (!buf) {
+        vga_print("[ERR: shell_readline buf NULL]\n");
+        serial_write("[ERR: shell_readline buf NULL]\n");
+        return;
+    }
+    input_len = 0; // Reset input_len for this specific readline call
+    while (1) {
+        // poll_keyboard_input(); // This should NOT be here
+        int c = get_ascii_char(); // This now calls Rust and handles waiting
+        if (c == -1) continue; // Should not happen with blocking get_ascii_char
+        if (c == '\n' || c == '\r') break;
+        if (c == 8 && input_len > 0) { // Backspace
+            input_len--;
+            vga_print("\b \b");
+        } else if (c >= 32 && input_len < maxlen-1) {
+            buf[input_len++] = c;
+            char s[2] = {c, 0};
+            vga_print(s);
+        }
+    }
+    buf[input_len] = 0; // Ensure null-termination
 }
