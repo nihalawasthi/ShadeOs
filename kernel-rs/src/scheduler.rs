@@ -20,8 +20,8 @@ pub extern "C" fn rust_scheduler_tick() {
         // Find the READY task with the highest priority (lowest value)
         loop {
             if (*t).state == 1 /* TASK_READY */ {
-                if (*t).priority < best_priority {
-                    best_priority = (*t).priority;
+                if ((*t).priority as i32) < best_priority {
+                    best_priority = (*t).priority as i32;
                     best = t;
                 }
             }

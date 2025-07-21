@@ -1,106 +1,172 @@
 use core::mem::size_of;
 use core::ptr::{null_mut, NonNull};
-use core::option::Option;
-use core::option::Option::{Some, None};
 
-const HEAP_SIZE: usize = 1024 * 1024; // 1 MiB
+extern "C" {
+    fn serial_write(s: *const u8);
+}
+
+fn serial_write_hex(val: u64) {
+    let mut buf = [0u8; 17];
+    let mut i = 15;
+    let mut v = val;
+    buf[16] = 0; // Null terminator
+
+    if v == 0 {
+        unsafe { serial_write(b"0\0".as_ptr()); }
+        return;
+    }
+
+    while v > 0 {
+        let digit = (v % 16) as u8;
+        buf[i] = if digit < 10 { b'0' + digit } else { b'a' + (digit - 10) };
+        v /= 16;
+        i -= 1;
+    }
+    unsafe { serial_write(buf.as_ptr().add(i + 1)); }
+}
+
+
+const HEAP_SIZE: usize = 1024 * 1024 * 4; // 4 MiB
 const ALIGNMENT: usize = 16;
 const BLOCK_MAGIC: u32 = 0xDEADBEEF;
-static mut HEAP: [u8; HEAP_SIZE] = [0; HEAP_SIZE];
 
-#[repr(C)]
-struct Block {
-    magic: u32,
-    size: usize,
-    free: bool,
-    next: Option<NonNull<Block>>,
+#[repr(C, align(16))]
+pub struct Block {
+    pub magic: u32,
+    pub size: usize,
+    pub is_free: bool,
+    pub next: *mut Block,
+    pub prev: *mut Block,
 }
 
-static mut HEAP_HEAD: Option<NonNull<Block>> = None;
+#[repr(align(16))]
+struct AlignedHeap([u8; HEAP_SIZE]);
+static mut HEAP: AlignedHeap = AlignedHeap([0; HEAP_SIZE]);
+static mut HEAP_HEAD: *mut Block = null_mut();
 
-fn align_up(addr: usize, align: usize) -> usize {
-    (addr + align - 1) & !(align - 1)
-}
-
-unsafe fn init_heap() {
-    if HEAP_HEAD.is_none() {
-        let head = HEAP.as_mut_ptr() as *mut Block;
+#[no_mangle]
+pub extern "C" fn init_heap() {
+    unsafe {
+        let head = HEAP.0.as_mut_ptr() as *mut Block;
+        let heap_base = HEAP.0.as_ptr() as usize;
+        let heap_end = heap_base + HEAP_SIZE;
+        serial_write(b"[HEAP-DEBUG] heap_base: 0x\0".as_ptr());
+        serial_write_hex(heap_base as u64);
+        serial_write(b"\n\0".as_ptr());
+        serial_write(b"[HEAP-DEBUG] heap_end: 0x\0".as_ptr());
+        serial_write_hex(heap_end as u64);
+        serial_write(b"\n\0".as_ptr());
         (*head).magic = BLOCK_MAGIC;
         (*head).size = HEAP_SIZE - size_of::<Block>();
-        (*head).free = true;
-        (*head).next = None;
-        HEAP_HEAD = Some(NonNull::new_unchecked(head));
+        (*head).is_free = true;
+        (*head).next = null_mut();
+        (*head).prev = null_mut();
+        HEAP_HEAD = head;
     }
 }
 
 #[no_mangle]
+pub extern "C" fn rust_get_block_header_size() -> usize {
+    size_of::<Block>()
+}
+
+#[no_mangle]
 pub extern "C" fn rust_kmalloc(size: usize) -> *mut u8 {
-    if size == 0 || size > HEAP_SIZE { return null_mut(); }
     unsafe {
-        init_heap();
+        if size == 0 {
+            return null_mut();
+        }
+
+        let aligned_size = (size + (ALIGNMENT - 1)) & !(ALIGNMENT - 1);
         let mut current = HEAP_HEAD;
-        while let Some(mut block_ptr) = current {
-            let block = block_ptr.as_mut();
-            if block.magic != BLOCK_MAGIC {
-                return null_mut(); // Corruption detected
-            }
-            if block.free && block.size >= size {
-                // Calculate aligned user pointer
-                let block_start = block as *mut Block as usize;
-                let user_start = align_up(block_start + size_of::<Block>(), ALIGNMENT);
-                let align_offset = user_start - (block_start + size_of::<Block>());
-                let total_needed = size + align_offset;
-                if block.size >= total_needed {
-                    // Split if large enough
-                    if block.size >= total_needed + size_of::<Block>() + ALIGNMENT {
-                        let new_block_ptr = (block as *mut Block as *mut u8)
-                            .add(size_of::<Block>() + total_needed) as *mut Block;
-                        (*new_block_ptr).magic = BLOCK_MAGIC;
-                        (*new_block_ptr).size = block.size - total_needed - size_of::<Block>();
-                        (*new_block_ptr).free = true;
-                        (*new_block_ptr).next = block.next;
-                        block.size = total_needed;
-                        block.next = Some(NonNull::new_unchecked(new_block_ptr));
+
+        while !current.is_null() {
+            let block = &mut *current;
+            if block.is_free && block.size >= aligned_size {
+                // This block is large enough.
+                // Check if we need to split it.
+                if block.size > aligned_size + size_of::<Block>() {
+                    // Split the block.
+                    let new_block_addr = (current as usize) + size_of::<Block>() + aligned_size;
+                    let new_block = new_block_addr as *mut Block;
+                    
+                    (*new_block).magic = BLOCK_MAGIC;
+                    (*new_block).size = block.size - aligned_size - size_of::<Block>();
+                    (*new_block).is_free = true;
+                    (*new_block).next = block.next;
+                    (*new_block).prev = current;
+
+                    if !block.next.is_null() {
+                        (*block.next).prev = new_block;
                     }
-                    block.free = false;
-                    let user_ptr = (block as *mut Block as *mut u8).add(size_of::<Block>() + align_offset);
-                    return user_ptr;
+                    
+                    // The original block is now smaller.
+                    block.size = aligned_size;
+                    block.next = new_block;
                 }
+                
+                block.is_free = false;
+                return (current as *mut u8).add(size_of::<Block>());
             }
             current = block.next;
         }
+
+        serial_write(b"[HEAP-ERROR] Out of memory!\n\0".as_ptr());
         null_mut()
     }
 }
 
 #[no_mangle]
 pub extern "C" fn rust_kfree(ptr: *mut u8) {
-    if ptr.is_null() { return; }
+    if ptr.is_null() {
+        return;
+    }
+    
     unsafe {
-        // Find the block header
-        let mut block_ptr = (ptr as usize - size_of::<Block>()) as *mut Block;
-        // Scan backwards if not aligned (in case of alignment offset)
-        while (*block_ptr).magic != BLOCK_MAGIC {
-            block_ptr = (block_ptr as *mut u8).sub(1) as *mut Block;
+        let block_ptr = (ptr as *mut u8).sub(size_of::<Block>()) as *mut Block;
+        let block = &mut *block_ptr;
+        
+        if block.magic != BLOCK_MAGIC || block.is_free {
+            serial_write(b"[HEAP-ERROR] Invalid free() or double free!\n\0".as_ptr());
+            return;
         }
-        if (*block_ptr).magic != BLOCK_MAGIC {
-            return; // Corruption detected
-        }
-        (*block_ptr).free = true;
-        // Merge adjacent free blocks
-        let mut current = HEAP_HEAD;
-        while let Some(mut block_ptr) = current {
-            let block = block_ptr.as_mut();
-            while let Some(mut next_ptr) = block.next {
-                let next = next_ptr.as_mut();
-                if block.free && next.free {
-                    block.size += size_of::<Block>() + next.size;
-                    block.next = next.next;
-                } else {
-                    break;
+
+        block.is_free = true;
+
+        // Coalesce with next block
+        if !block.next.is_null() {
+            let next_block = &mut *block.next;
+            if next_block.is_free {
+                block.size += size_of::<Block>() + next_block.size;
+                block.next = next_block.next;
+                if !next_block.next.is_null() {
+                    (*next_block.next).prev = block_ptr;
                 }
             }
-            current = block.next;
+        }
+
+        // Coalesce with previous block
+        if !block.prev.is_null() {
+            let prev_block = &mut *block.prev;
+            if prev_block.is_free {
+                prev_block.size += size_of::<Block>() + block.size;
+                prev_block.next = block.next;
+                if !block.next.is_null() {
+                    (*block.next).prev = block.prev;
+                }
+            }
         }
     }
-} 
+}
+
+// Stubs for functions that were removed but might still be called elsewhere
+#[no_mangle]
+pub extern "C" fn rust_heap_validate() -> bool {
+    true // Bump allocator is always valid
+}
+
+#[no_mangle]
+pub extern "C" fn rust_heap_stats() -> (usize, usize, usize) {
+    (0, 0, 0) // Not implemented for bump allocator
+}
+

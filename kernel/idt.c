@@ -1,4 +1,3 @@
-// kernel/idt.c - Enhanced Interrupt Descriptor Table
 #include "kernel.h"
 #include "idt.h"
 #include "serial.h"
@@ -41,19 +40,14 @@ static void idt_set_gate(uint8_t num, uint64_t base, uint16_t selector, uint8_t 
 // Externally defined ISR stubs
 extern void* isr_stub_table[256];
 
-void idt_init() {
-    serial_write("[IDT] Starting IDT initialization\n");
-    
-    serial_write("[IDT] Setting up IDT pointer\n");
+void idt_init() {    
     idt_pointer.limit = sizeof(struct idt_entry) * 256 - 1;
     idt_pointer.base = (uint64_t)&idt;
     serial_write("[IDT] IDT pointer setup complete\n");
     
-    serial_write("[IDT] Clearing IDT array\n");
     memset(&idt, 0, sizeof(struct idt_entry) * 256);
     serial_write("[IDT] IDT array cleared\n");
     
-    serial_write("[IDT] Setting up IDT gates\n");
     for (int i = 0; i < 256; i++) {
         if (i == 0) {
             serial_write("[IDT] Setting gate 0\n");
@@ -80,9 +74,7 @@ void idt_init() {
     extern void syscall_entry();
     idt_set_gate(0x80, (uint64_t)syscall_entry, 0x08, 0xEE);
     
-    serial_write("[IDT] About to call idt_flush\n");
     idt_flush((uint64_t)&idt_pointer);
-    serial_write("[IDT] idt_flush completed\n");
     
     serial_write("[IDT] IDT initialization complete\n");
 }

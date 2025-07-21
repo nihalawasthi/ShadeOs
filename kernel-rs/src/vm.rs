@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 extern "C" {
     fn rust_paging_new_pml4() -> u64;
     fn rust_paging_free_pml4(pml4_phys: u64);
@@ -21,4 +19,4 @@ pub fn test_vm_ffi() {
         rust_paging_free_pml4(pml4);
         crate::vga_print(b"[RUST VM] Freed PML4\n\0".as_ptr());
     }
-} 
+}

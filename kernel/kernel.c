@@ -6,15 +6,60 @@
 #include "keyboard.h"
 #include "serial.h"
 #include "vfs.h" // Keep this for shell, but its implementation will change
-#include "shell.h"
 #include "rtl8139.h"
 #include "net.h"
 #include "task.h"
 #include "syscall.h"
 #include "blockdev.h" // Needed for blockdev_get in Rust FFI
+#include <stdbool.h>
+typedef unsigned int u32;
 
 // Declare the Rust entry point function
 extern void rust_entry_point();
+
+// Declare Rust bash functions
+extern void rust_bash_init();
+extern void rust_bash_run();
+
+// Declare new Rust functions
+extern void rust_process_init();
+extern void rust_syscall_init();
+extern u32 rust_process_create(u32 parent_pid, bool is_kernel);
+extern void rust_process_list();
+
+// Add FFI declaration for Rust init_heap
+extern void init_heap();
+
+// Minimal valid ELF64 binary (hello world stub, 128 bytes)
+static const unsigned char test_elf_stub[128] = {
+    0x7F, 'E', 'L', 'F', // Magic
+    2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 64-bit, LSB, version, padding
+    2, 0, // ET_EXEC
+    0x3E, 0x00, // EM_X86_64
+    1, 0, 0, 0, // EV_CURRENT
+    0x78, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, // e_entry (0x400078)
+    0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // e_phoff (64)
+    0, 0, 0, 0, 0, 0, 0, 0, // e_shoff
+    0, 0, 0, 0, // e_flags
+    0x40, 0x00, // e_ehsize (64)
+    0x38, 0x00, // e_phentsize (56)
+    0x01, 0x00, // e_phnum (1)
+    0, 0, // e_shentsize
+    0, 0, // e_shnum
+    0, 0, // e_shstrndx
+    // Program header (PT_LOAD)
+    1, 0, 0, 0, // p_type (PT_LOAD)
+    5, 0, 0, 0, // p_flags (R+X)
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // p_offset
+    0x78, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, // p_vaddr (0x400078)
+    0x78, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, // p_paddr
+    0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // p_filesz (8)
+    0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // p_memsz (8)
+    0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // p_align (0x1000)
+    // Code at 0x400078 (just ret)
+    0xC3, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, // ret + padding
+    // Padding to 128 bytes
+};
 
 // PIC initialization function
 void pic_init() {
@@ -35,8 +80,8 @@ void pic_init() {
 void demo_task1() {
     int count = 0;
     while (count < 10) {
-        vga_set_color(0x0B);
-        vga_print("[Task1] Hello from Task 1 - Count: ");
+        rust_vga_set_color(0x0B);
+        rust_vga_print("[Task1] Hello from Task 1 - Count: ");
         // Print count
         char count_str[16];
         int temp = count;
@@ -52,20 +97,20 @@ void demo_task1() {
             count_str[j] = count_str[i-1-j];
             count_str[i-1-j] = t;
         }
-        vga_print(count_str);
-        vga_print("\n");
+        rust_vga_print(count_str);
+        rust_vga_print("\n");
         for (volatile int i = 0; i < 10000000; i++);
         count++;
     }
-    vga_print("[Task1] Task 1 completed!\n");
+    rust_vga_print("[Task1] Task 1 completed!\n");
     task_exit();
 }
 
 void demo_task2() {
     int count = 0;
     while (count < 10) {
-        vga_set_color(0x0E);
-        vga_print("[Task2] Hello from Task 2 - Count: ");
+        rust_vga_set_color(0x0E);
+        rust_vga_print("[Task2] Hello from Task 2 - Count: ");
         // Print count
         char count_str[16];
         int temp = count;
@@ -81,16 +126,41 @@ void demo_task2() {
             count_str[j] = count_str[i-1-j];
             count_str[i-1-j] = t;
         }
-        vga_print(count_str);
-        vga_print("\n");
+        rust_vga_print(count_str);
+        rust_vga_print("\n");
         for (volatile int i = 0; i < 10000000; i++);
         count++;
     }
-    vga_print("[Task2] Task 2 completed!\n");
+    rust_vga_print("[Task2] Task 2 completed!\n");
     task_exit();
 }
 
+// Minimal hex print for 64-bit values
+void print_hex64(unsigned long val) {
+    char buf[17];
+    for (int i = 0; i < 16; i++) {
+        int shift = (15 - i) * 4;
+        int digit = (val >> shift) & 0xF;
+        buf[i] = (digit < 10) ? ('0' + digit) : ('A' + digit - 10);
+    }
+    buf[16] = 0;
+    serial_write(buf);
+}
+// Minimal decimal print for 64-bit values
+void print_dec64(unsigned long val) {
+    char buf[21];
+    int i = 20;
+    buf[i--] = 0;
+    if (val == 0) buf[i--] = '0';
+    while (val > 0 && i >= 0) {
+        buf[i--] = '0' + (val % 10);
+        val /= 10;
+    }
+    serial_write(&buf[i+1]);
+}
+
 void kernel_main(uint64_t mb2_info_ptr) {
+    serial_write("[DEBUG] Entering kernel_main\n");
     // VGA direct print (always enabled)
     volatile uint16_t* vga = (uint16_t*)0xB8000;
     for (int i = 0; i < 80 * 25; i++) vga[i] = 0x0F20;
@@ -98,151 +168,171 @@ void kernel_main(uint64_t mb2_info_ptr) {
     for (int i = 0; msg[i]; i++) vga[i] = 0x0A00 | msg[i];
 
     // VGA init/clear
-    vga_init();
-    vga_clear();
-    vga_set_color(0x0A);
-    vga_print("ShadeOS v0.1\n");
-    vga_set_color(0x0F);
-    vga_print("======================================\n\n");
+    rust_vga_clear();
+    rust_vga_set_color(0x0A);
+    rust_vga_print("ShadeOS v0.1\n");
+    rust_vga_set_color(0x0F);
+    rust_vga_print("======================================\n\n");
 
     // Print Multiboot2 info pointer
-    vga_print("[BOOT] Multiboot2 info pointer: 0x");
     for (int i = 60; i >= 0; i -= 4) {
         uint8_t digit = (mb2_info_ptr >> i) & 0xF;
         vga_putchar(digit < 10 ? '0' + digit : 'A' + digit - 10);
     }
-    vga_print("\n");
 
     //Parse Multiboot2 memory map
     parse_multiboot2_memory_map(mb2_info_ptr);
 
     // Physical memory manager
     pmm_init(mb2_info_ptr);
-    vga_print("[BOOT] Physical memory manager initialized\n");
-    vga_print("[BOOT] Total memory: ");
+    rust_vga_print("[BOOT] Total memory: ");
     uint64_t total = pmm_total_memory();
     for (int i = 60; i >= 0; i -= 4) {
         uint8_t digit = (total >> i) & 0xF;
         vga_putchar(digit < 10 ? '0' + digit : 'A' + digit - 10);
     }
-    vga_print(" bytes\n");
-    vga_print("[BOOT] Free memory: ");
+    rust_vga_print(" bytes\n");
+    rust_vga_print("[BOOT] Free memory: ");
     uint64_t free = pmm_free_memory();
     for (int i = 60; i >= 0; i -= 4) {
         uint8_t digit = (free >> i) & 0xF;
         vga_putchar(digit < 10 ? '0' + digit : 'A' + digit - 10);
     }
-    vga_print(" bytes\n");
+    rust_vga_print(" bytes\n");
 
     // Paging
     paging_init();
-    vga_print("[BOOT] Virtual memory manager (paging) initialized\n");
 
     // Heap
-    heap_init();
-    vga_print("[BOOT] Kernel heap allocator initialized\n");
+    // heap_init(); // Remove C heap init
+    init_heap();    // Call Rust heap init
 
     // Timer
     timer_init(100); // 100 Hz
-    vga_print("[BOOT] PIT timer initialized (100 Hz)\n");
 
     // Serial
     serial_init();
-    vga_print("[BOOT] Serial port (COM1) initialized\n");
-    serial_write("[BOOT] ShadeOS serial port initialized\n");
+    rust_vga_print("[BOOT] paging, heap allocator, PIT timer, serial port (COM1) initialized (100 Hz)\n");
+    serial_write("[BOOT] paging, heap allocator, PIT timer, serial port (COM1) initialized (100 Hz)\n");
 
     // GDT/IDT
-    vga_print("[BOOT] Initializing GDT...\n");
     gdt_init();
-    vga_print("[BOOT] GDT initialized.\n");
-    vga_print("[BOOT] Initializing IDT...\n");
     idt_init();
-    vga_print("[BOOT] IDT initialized.\n");
     
-    // PIC initialization
-    vga_print("[BOOT] Initializing PIC...\n");
+    // PIC
     pic_init();
-    vga_print("[BOOT] PIC initialized.\n");
 
     // Keyboard
     initialize_keyboard();
-    vga_print("[BOOT] Keyboard driver initialized\n");
+    rust_vga_print("[BOOT] GDT & IDT, PIC, Keyboard driver initialized\n");
     
-    vga_print("[BOOT] Kernel loaded successfully!\n");
-    vga_print("[BOOT] VGA text mode initialized\n\n");
+    rust_vga_print("[BOOT] Kernel loaded successfully!\n");
 
     // Block Device (for Rust VFS)
-    vga_print("[BOOT] Initializing Block Devices...\n");
     blockdev_init(); // Initialize the C ramdisk block device
-    vga_print("[BOOT] Block Devices initialized.\n");
-    vga_print("[DEBUG] Block device init complete\n");
-    serial_write("[DEBUG] Block device init complete\n");
-
-    // Add more debug before VFS or Rust
-    vga_print("[DEBUG] About to init VFS or call Rust\n");
-    serial_write("[DEBUG] About to init VFS or call Rust\n");
+    rust_vga_print("[BOOT] Block Devices initialized.\n");
 
     // Network
     rtl8139_init();
-    vga_print("[BOOT] RTL8139 network driver initialized\n");
     serial_write("[BOOT] RTL8139 network driver initialized\n");
     struct ip_addr ip = { {10,0,2,15} };
     net_init(ip);
-    vga_print("[BOOT] Network stack (UDP/IP) initialized\n");
+    rust_vga_print("[BOOT] Network stack initialized\n");
 
-    // Multitasking
-    vga_print("[BOOT] About to initialize multitasking...\n");
-    serial_write("[BOOT] About to initialize multitasking...\n");
-    
+    // Multitasking    
     task_init();
-    vga_print("[BOOT] Task system initialized\n");
+    rust_vga_print("[BOOT] Task system initialized\n");
     serial_write("[BOOT] Task system initialized\n");
 
-    // Minimal user process that triggers syscalls
-    void user_process() {
-        sys_write("[USER] Hello from user mode!\n");
-        sys_exit();
-        while (1) {} // Should not reach here
-    }
-    // Allocate user stack (page-aligned, 16KB)
-    static uint8_t user_stack[16384] __attribute__((aligned(4096)));
-    task_create_user(user_process, user_stack, sizeof(user_stack), 0);
-    vga_print("[BOOT] User process created\n");
-    serial_write("[BOOT] User process created\n");
-
-    // Initialize and run the shell after user process creation
-    vga_print("[BOOT] Initializing shell...\n");
-    serial_write("[BOOT] Initializing shell...\n");
-    shell_init();
-    vga_print("[BOOT] Shell initialized\n");
-    serial_write("[BOOT] Shell initialized\n");
     // VFS
-    // vga_print("[BOOT] Initializing VFS...\n");
-    // serial_write("[BOOT] Initializing VFS...\n");
-    // vfs_init();
-    vga_print("[BOOT] Calling Rust VFS init...\n");
-    serial_write("[BOOT] Calling Rust VFS init...\n");
     rust_vfs_init();
-    vga_print("[BOOT] Returned from Rust VFS init.\n");
-    serial_write("[BOOT] Returned from Rust VFS init.\n");
+    rust_vga_print("[BOOT] VFS initialized\n");
+    serial_write("[BOOT] VFS initialized\n");
 
-    // Shell
-    // vga_print("[BOOT] Initializing shell...\n");
-    // serial_write("[BOOT] Initializing shell...\n");
-    // shell_init();
-    // vga_print("[BOOT] Shell initialized\n");
-    // serial_write("[BOOT] Shell initialized\n");
-    
-    // SSyscalls
-    vga_print("[BOOT] Initializing syscalls...\n");
-    serial_write("[BOOT] Initializing syscalls...\n");
+    // Process management
+    rust_process_init();
+    rust_vga_print("[BOOT] Process management initialized\n");
+    serial_write("[BOOT] Process management initialized\n");
+
+    // System calls  
+    rust_syscall_init();
+    rust_vga_print("[BOOT] System call interface initialized\n");
+    serial_write("[BOOT] System call interface initialized\n");
+
+    // Create /bin and other directories
+    rust_vga_print("[BOOT] Setting up filesystem structure...\n");
+    serial_write("[BOOT] Setting up filesystem structure...\n");
+    rust_vfs_mkdir("/bin\0");
+    rust_vfs_mkdir("/usr\0");
+    rust_vfs_mkdir("/usr/bin\0");
+    rust_vfs_mkdir("/sbin\0");
+    rust_vfs_mkdir("/usr/sbin\0");
+    rust_vfs_mkdir("/etc\0");
+    rust_vfs_mkdir("/home\0");
+    rust_vfs_mkdir("/root\0");
+    rust_vfs_mkdir("/tmp\0");
+    rust_vfs_mkdir("/var\0");
+    rust_vfs_mkdir("/dev\0");
+    rust_vfs_mkdir("/proc\0");
+    rust_vfs_mkdir("/sys\0");
+
+    // Create bash binary
+    rust_vfs_create_file("/bin/bash\0");
+    static const char bash_binary[] = "/bin/bash\0";
+    serial_write("[BOOT] Creating bash binary...\n");
+    // Minimal valid ELF64 binary (hello world stub, 128 bytes)
+    static const unsigned char test_elf_stub[128] = {
+        0x7F, 'E', 'L', 'F', 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        2, 0, 0x3E, 0x00, 1, 0, 0, 0, 0x78, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0x40, 0x00, 0x38, 0x00, 0x01, 0x00, 0, 0, 0, 0, 0, 0,
+        1, 0, 0, 0, 5, 0, 0, 0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x78, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x78, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC3, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90
+    };
+    uint64_t vfs_ret = rust_vfs_write(bash_binary, test_elf_stub, sizeof(test_elf_stub));
+    serial_write("[BOOT] Bash binary created\n");
+
+    // Create some basic files
+    rust_vfs_create_file("/etc/passwd\0");
+    rust_vfs_write("/etc/passwd\0", "root:x:0:0:root:/root:/bin/bash\n\0", 32);
+    rust_vfs_create_file("/etc/hostname\0");
+    rust_vfs_write("/etc/hostname\0", "shadeos\n\0", 9);
+
+    // Syscalls
     syscall_init();
-    vga_print("[BOOT] Syscalls initialized\n");
+    rust_vga_print("[BOOT] Syscalls initialized\n");
     serial_write("[BOOT] Syscalls initialized\n");
-    
-    // Start the shell
-    
-    vga_print("[BOOT] Starting shell...\n");
-    serial_write("[BOOT] Starting shell...\n");
-    shell_run();
+
+    // Initialize Rust components
+    rust_entry_point();
+
+    // Clear keyboard buffer before starting shell
+    extern void rust_keyboard_clear_buffer();
+    rust_keyboard_clear_buffer();
+
+    // Initialize bash shell
+    rust_vga_print("[BOOT] Initializing Bash shell...\n");
+    serial_write("[BOOT] Initializing Bash shell...\n");
+    rust_bash_init();
+
+    // Start the bash shell directly
+    // rust_vga_print("[BOOT] Starting Bash shell...\n");
+    //serial_write("[BOOT] Starting Bash shell.\n");
+    rust_bash_run();
+    rust_vga_set_color(0x0E);
+    rust_vga_print("Welcome to ShadeOS - Linux-Compatible Kernel\n");
+    rust_vga_print("Bash-compatible shell ready!\n");
+    rust_vga_set_color(0x0F);
+    rust_vga_print("\n");
+
+    // Minimal heap allocation and write test
+    void* test_ptr = rust_kmalloc(64);
+    if (test_ptr) {
+        ((char*)test_ptr)[0] = 0x42;
+        serial_write("[C-DEBUG] kmalloc write OK\n");
+    } else {
+        serial_write("[C-DEBUG] kmalloc failed\n");
+    }
 }

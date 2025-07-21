@@ -5,8 +5,8 @@ LD = x86_64-elf-ld
 CFLAGS = -ffreestanding -fno-pie -nostdlib -mno-red-zone -Wall -Wextra -std=c11 -O2 -Ikernel
 ASFLAGS = -f elf64
 
-KERNEL_SOURCES = kernel/kernel.c kernel/vga.c kernel/gdt.c kernel/idt.c kernel/memory.c kernel/multiboot.c kernel/pmm.c kernel/paging.c kernel/heap.c kernel/timer.c kernel/keyboard.c kernel/serial.c kernel/shell.c kernel/pkg.c kernel/rtl8139.c kernel/net.c kernel/task.c kernel/syscall.c kernel/fat.c kernel/blockdev.c kernel/helpers.c
-KERNEL_OBJECTS = kernel/kernel.o kernel/vga.o kernel/gdt.o kernel/idt.o kernel/memory.o kernel/multiboot.o kernel/pmm.o kernel/paging.o kernel/heap.o kernel/timer.o kernel/keyboard.o kernel/serial.o kernel/shell.o kernel/pkg.o kernel/rtl8139.o kernel/net.o kernel/task.o kernel/syscall.o kernel/fat.o kernel/blockdev.o kernel/vfs_stubs.o kernel/helpers.o
+KERNEL_SOURCES = kernel/kernel.c kernel/vga.c kernel/gdt.c kernel/idt.c kernel/memory.c kernel/multiboot.c kernel/pmm.c kernel/paging.c kernel/heap.c kernel/timer.c kernel/keyboard.c kernel/serial.c kernel/pkg.c kernel/rtl8139.c kernel/net.c kernel/task.c kernel/syscall.c kernel/fat.c kernel/blockdev.c kernel/helpers.c
+KERNEL_OBJECTS = kernel/kernel.o kernel/vga.o kernel/gdt.o kernel/idt.o kernel/memory.o kernel/multiboot.o kernel/pmm.o kernel/paging.o kernel/heap.o kernel/timer.o kernel/keyboard.o kernel/serial.o kernel/pkg.o kernel/rtl8139.o kernel/net.o kernel/task.o kernel/syscall.o kernel/fat.o kernel/blockdev.o kernel/vfs_stubs.o kernel/helpers.o
 
 # Rust specific variables
 RUST_TARGET = x86_64-unknown-none

@@ -38,10 +38,10 @@ extern int rust_vfs_init();
 extern int rust_vfs_mkdir(const char* path);
 extern int rust_vfs_ls(const char* path);
 extern int rust_vfs_read(const char* path, void* buf, int max_len);
-extern int rust_vfs_write(const char* path, const void* buf, int len);
+extern uint64_t rust_vfs_write(const char* path, const void* buf, uint64_t len);
 extern void* rust_vfs_get_root();
 extern int rust_vfs_create_file(const char* path);
 extern int rust_vfs_unlink(const char* path);
-extern int rust_vfs_stat(const char* path, void* stat_out);
+extern int rust_vfs_stat(const char* path, struct vfs_node* stat_out);
 
 #endif

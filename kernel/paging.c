@@ -2,6 +2,7 @@
 #include "pmm.h"
 #include "kernel.h"
 #include "serial.h"
+#include "memory.h"
 
 #define PML4_ENTRIES 512
 #define PDPTE_ENTRIES 512
@@ -9,6 +10,9 @@
 #define PTE_ENTRIES 512
 
 uint64_t* pml4_table = 0;
+
+// Prototype for debug print function
+void print_hex64(unsigned long val);
 
 static inline uint64_t* get_table(uint64_t phys_addr) {
     return (uint64_t*)(phys_addr);
@@ -21,19 +25,29 @@ static uint64_t get_pt_index(uint64_t addr)   { return (addr >> 12) & 0x1FF; }
 
 void paging_init() {
     vga_print("[BOOT] Initializing paging...\n");
-    serial_write("[PAGING] paging_init: start\n");
+    serial_write("[BOOT] Initializing paging...\n");
     pml4_table = (uint64_t*)alloc_page();
     memset(pml4_table, 0, PAGE_SIZE);
 
-    // Identity map kernel (1 MiB to 16 MiB)
-    for (uint64_t addr = 0x100000; addr < 0x1000000; addr += PAGE_SIZE) {
+    // --- TEST: Copy kernel PML4 upper half before enabling paging ---
+    uint64_t* test_user_pml4 = (uint64_t*)alloc_page();
+    if (!test_user_pml4) {
+        serial_write("[PAGING]: alloc_page for test_user_pml4 failed!\n");
+    } else {
+        memset(test_user_pml4, 0, PAGE_SIZE);
+        for (int i = 256; i < 512; i++) {
+            test_user_pml4[i] = pml4_table[i];
+        }
+        serial_write("[PAGING]: kernel PML4 copy before paging enabled OK\n");
+    }
+    // Map all physical memory from 1MB to 16MB
+    // Identity map the first 16MB of physical memory. This is a simple and robust
+    // way to ensure the kernel code, VGA buffer, and initial heap are all
+    // accessible after enabling paging.
+    for (uint64_t addr = 0; addr < 0x1000000; addr += PAGE_SIZE) { // 16MB
         map_page(addr, addr, PAGE_PRESENT | PAGE_RW);
     }
-    serial_write("[PAGING] kernel identity map done\n");
-
-    // Identity map VGA (0xB8000)
-    map_page(0xB8000, 0xB8000, PAGE_PRESENT | PAGE_RW);
-    serial_write("[PAGING] VGA map done\n");
+    serial_write("[PAGING] Identity mapped first 16MB\n");
 
     // Load new PML4
     __asm__ volatile("mov %0, %%cr3" : : "r"(pml4_table));
@@ -104,14 +118,27 @@ void map_user_page(uint64_t virt_addr, uint64_t phys_addr) {
 
 // Create a new PML4 for a user process, mapping kernel memory
 uint64_t paging_new_pml4() {
+    serial_write("[PAGING] paging_new_pml4: called\n");
     uint64_t* new_pml4 = (uint64_t*)alloc_page();
-    if (!new_pml4) return 0;
+    if (!new_pml4) {
+        serial_write("[PAGING] paging_new_pml4: alloc_page returned NULL!\n");
+        return 0;
+    }
+    serial_write("[PAGING] paging_new_pml4: alloc_page OK\n");
     memset(new_pml4, 0, PAGE_SIZE);
-    // Map kernel memory (copy kernel PML4 entries for higher half)
     extern uint64_t* pml4_table;
+    if (!pml4_table) {
+        serial_write("[PAGING] paging_new_pml4: pml4_table is NULL!\n");
+        return 0;
+    }
+    serial_write("[PAGING] paging_new_pml4: pml4_table OK\n");
+    char addr_msg[128];
+    snprintf(addr_msg, sizeof(addr_msg), "[PAGING] pml4_table=0x%lx &pml4_table[256]=0x%lx pml4_table[256]=0x%lx\n", (unsigned long)pml4_table, (unsigned long)&pml4_table[256], (unsigned long)pml4_table[256]);
+    serial_write(addr_msg);
     for (int i = 256; i < 512; i++) {
         new_pml4[i] = pml4_table[i];
     }
+    serial_write("[PAGING] paging_new_pml4: done copying kernel entries\n");
     // Optionally: map user stack/code here
     return (uint64_t)new_pml4;
 }

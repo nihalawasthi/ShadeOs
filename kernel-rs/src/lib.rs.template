@@ -1,28 +1,173 @@
 #![no_std]
-#![no_main] // Disable the default main function
+#![feature(alloc)]
+#![feature(alloc_error_handler)]
 
+extern crate alloc;
 use core::panic::PanicInfo;
-use core::ffi::c_void;
-use core::marker::{Sync, Send};
+use crate::scheduler::rust_scheduler_tick;
 
-// Define C functions that Rust will call
+// Link to C functions
 extern "C" {
     fn vga_print(s: *const u8);
     fn serial_write(s: *const u8);
-    fn task_schedule(); // Placeholder for scheduler
     fn sys_cli(); // Disable interrupts
     fn sys_sti(); // Enable interrupts
     fn pause();   // HLT instruction
 }
 
-mod vfs;
-mod heap; // Required for kernel heap FFI
-mod memory; // Required for kernel memory FFI
-mod keyboard; // New keyboard module
+// Public modules to be accessible from other parts of the kernel
+pub mod vfs;
+pub mod heap;
+pub mod process;
+pub mod scheduler;
+pub mod keyboard;
+pub mod bash;
+pub mod memory;
+pub mod elf;
+pub mod vga;
+pub mod syscalls;
+pub mod serial;
+
+use alloc::alloc::GlobalAlloc;
+
+#[global_allocator]
+static GLOBAL: KernelAllocator = KernelAllocator;
+
+struct KernelAllocator;
+
+unsafe impl GlobalAlloc for KernelAllocator {
+    unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
+        rust_kmalloc(layout.size())
+    }
+    unsafe fn dealloc(&self, ptr: *mut u8, _layout: core::alloc::Layout) {
+        rust_kfree(ptr)
+    }
+}
+
+extern "C" {
+    fn rust_kmalloc(size: usize) -> *mut u8;
+    fn rust_kfree(ptr: *mut u8);
+}
+
+use core::ffi::{c_void, c_char, c_uchar};
+use core::marker::{Sync, Send};
+
+// Define C functions that Rust will call
+extern "C" {
+    fn task_switch(old_rsp: *mut u64, new_rsp: u64);
+    fn task_schedule(); // Placeholder for scheduler
+}
+
+use process::Task;
+
+#[no_mangle]
+#[used]
+#[link_section = ".data"]
+pub static mut current: *mut Task = core::ptr::null_mut();
+#[no_mangle]
+#[used]
+#[link_section = ".data"]
+pub static mut TASKS: [Task; 16] = [Task {
+    rsp: 0,
+    rip: 0,
+    stack: [0; 16384],
+    state: 3, // TASK_TERMINATED
+    id: -1,
+    user_mode: 0,
+    priority: 0,
+    cr3: 0,
+    next: core::ptr::null_mut(),
+}; 16];
+#[no_mangle]
+#[used]
+#[link_section = ".data"]
+pub static mut NUM_TASKS: i32 = 0;
+#[no_mangle]
+#[used]
+#[link_section = ".data"]
+pub static mut RUST_MAX_TASKS: usize = 16;
+
+#[no_mangle]
+pub extern "C" fn rust_task_init() {
+    unsafe {
+        for t in TASKS.iter_mut() {
+            t.state = 3; // TASK_TERMINATED
+            t.id = -1;
+            t.next = core::ptr::null_mut();
+        }
+        NUM_TASKS = 0;
+        current = core::ptr::null_mut();
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn rust_task_create(entry: extern "C" fn()) -> i32 {
+    unsafe {
+        for i in 0..RUST_MAX_TASKS {
+            let t = &mut TASKS[i];
+            if t.state == 3 {
+                t.state = 1; // TASK_READY
+                t.id = i as i32;
+                t.rip = entry as u64;
+                t.rsp = (&t.stack[16384 - 1] as *const u8) as u64;
+                // Insert into circular linked list
+                if current.is_null() {
+                    t.next = t as *mut Task;
+                    current = t as *mut Task;
+                } else {
+                    // Insert after current
+                    let next = (*current).next;
+                    (*current).next = t as *mut Task;
+                    t.next = next;
+                }
+                NUM_TASKS += 1;
+                return t.id;
+            }
+        }
+        -1
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn rust_task_create_user(_entry: extern "C" fn(), _user_stack: *mut c_void, _stack_size: i32, _arg: *mut c_void) -> i32 {
+    // Implement user task creation logic as needed
+    -1
+}
+
+#[no_mangle]
+pub extern "C" fn rust_task_yield() {
+    unsafe {
+        rust_scheduler_tick();
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn rust_task_exit() {
+    unsafe {
+        if !current.is_null() {
+            (*current).state = 3; // TASK_TERMINATED
+            rust_scheduler_tick();
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn rust_task_schedule() {
+    unsafe {
+        rust_scheduler_tick();
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn rust_elf_load(path_ptr: *const u8) -> i32 {
+    elf::rust_elf_load(path_ptr)
+}
 
 pub use vfs::*; // Export VFS functions
 pub use heap::*; // Export heap functions
 pub use memory::*; // Export memory functions
+pub use crate::bash::{rust_bash_init, rust_bash_run, rust_bash_execute};
+pub use serial::*;
 
 // Force emission of FFI functions for C linkage
 #[used]
@@ -35,14 +180,46 @@ static _KEEP_FFI: [&'static (dyn Sync + Send); 7] = [
     &rust_vfs_unlink,
     &rust_vfs_stat,
 ];
+#[used]
+static _KEEP_BASH_FFI: [unsafe extern "C" fn(); 2] = [rust_bash_init, rust_bash_run];
+use crate::syscalls::rust_syscall_init;
+#[used]
+static _FORCE_RUST_SYSCALL_INIT: extern "C" fn() = rust_syscall_init;
 
 // A simple panic handler for bare-metal
 #[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
-    unsafe {
-        serial_write(b"[RUST PANIC] Kernel panicked!\n\0".as_ptr());
-        vga_print(b"[RUST PANIC] Kernel panicked!\n\0".as_ptr());
+fn panic(info: &PanicInfo) -> ! {
+    use crate::serial_write;
+    let msg = b"[RUST PANIC] ";
+    unsafe { serial_write(msg.as_ptr()); }
+    if let Some(location) = info.location() {
+        let file = location.file().as_bytes();
+        unsafe { serial_write(file.as_ptr()); }
+        unsafe { serial_write(b":".as_ptr()); }
+        let line = location.line();
+        let mut buf = [b'0'; 20];
+        let mut n = line;
+        let mut i = 0;
+        if n == 0 { buf[i] = b'0'; i += 1; } else {
+            let mut digits = [0u8; 20];
+            let mut d = 0;
+            while n > 0 { digits[d] = b'0' + (n % 10) as u8; n /= 10; d += 1; }
+            for j in (0..d).rev() { buf[i] = digits[j]; i += 1; }
+        }
+        buf[i] = b' '; i += 1; buf[i] = 0;
+        unsafe { serial_write(buf.as_ptr()); }
     }
+    let args = info.message();
+    use core::fmt::Write;
+    struct SerialWriter;
+    impl core::fmt::Write for SerialWriter {
+        fn write_str(&mut self, s: &str) -> core::fmt::Result {
+            unsafe { serial_write(s.as_ptr()); }
+            Ok(())
+        }
+    }
+    let _ = write!(&mut SerialWriter, "{}", args);
+    unsafe { serial_write(b"\n\0".as_ptr()); }
     loop {}
 }
 
@@ -54,13 +231,6 @@ pub extern "C" fn rust_entry_point() {
         serial_write(b"[RUST] Hello from Rust!\n\0".as_ptr());
     }
     keyboard::init(); // Initialize the Rust keyboard buffer
-    // No longer creating a user process here, as it's done in C kernel_main
-    // No longer calling task_schedule here, as it's done in C kernel_main
 }
 
-// Placeholder for scheduler tick, if needed by C
-#[no_mangle]
-pub extern "C" fn rust_scheduler_tick() {
-    // Implement Rust-side scheduling logic here if needed
-    // For now, it's a no-op as C handles task_yield/task_exit
-}
+// The scheduler tick function is now in scheduler.rs, so this duplicate is removed.

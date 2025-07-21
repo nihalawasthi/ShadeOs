@@ -4,7 +4,7 @@
 #include "serial.h"
 #include "vga.h"
 
-#define RAMDISK_SIZE (2*1024*1024)
+#define RAMDISK_SIZE (8*1024*1024) // Reduce to 8MB for BSS safety; use dynamic alloc for larger
 static uint8_t ramdisk[RAMDISK_SIZE];
 
 static int ramdisk_read(int sector, void* buf, int count) {
@@ -25,27 +25,21 @@ static int ramdisk_write(int sector, const void* buf, int count) {
 static blockdev_t blockdevs[MAX_BLOCKDEVS];
 
 void blockdev_init() {
-    serial_write("[BLOCKDEV] Starting blockdev_init\n");
     vga_print("[BLOCKDEV] Starting blockdev_init\n");
     
-    serial_write("[BLOCKDEV] Setting blockdev[0].id = 0\n");
     vga_print("[BLOCKDEV] Setting blockdev[0].id = 0\n");
     blockdevs[0].id = 0;
     
     serial_write("[BLOCKDEV] Setting blockdev[0].read = ramdisk_read\n");
-    vga_print("[BLOCKDEV] Setting blockdev[0].read = ramdisk_read\n");
     blockdevs[0].read = ramdisk_read;
     
-    serial_write("[BLOCKDEV] Setting blockdev[0].write = ramdisk_write\n");
     vga_print("[BLOCKDEV] Setting blockdev[0].write = ramdisk_write\n");
     blockdevs[0].write = ramdisk_write;
     
     serial_write("[BLOCKDEV] Setting blockdev[0].total_sectors\n");
-    vga_print("[BLOCKDEV] Setting blockdev[0].total_sectors\n");
     blockdevs[0].total_sectors = RAMDISK_SIZE / BLOCKDEV_SECTOR_SIZE;
     
     serial_write("[BLOCKDEV] blockdev_init complete\n");
-    vga_print("[BLOCKDEV] blockdev_init complete\n");
 }
 
 blockdev_t* blockdev_get(int id) {

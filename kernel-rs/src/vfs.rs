@@ -1,335 +1,363 @@
+use alloc::collections::BTreeMap;
+use alloc::vec::Vec;
+use alloc::string::String;
+use alloc::string::ToString;
+use core::iter::Iterator;
+use core::ptr;
+use core::clone::Clone;
 use core::option::Option;
 use core::option::Option::{Some, None};
 
-// External C functions for logging
 extern "C" {
-    fn vga_print(s: *const u8);
     fn serial_write(s: *const u8);
+    fn vga_print(s: *const u8);
 }
 
-#[derive(Copy, Clone, PartialEq, Eq)]
-#[repr(u8)]
-pub enum VfsNodeType {
-    Unused = 0,
-    Dir = 1,
-    File = 2,
+#[derive(Clone)]
+enum FileType {
+    Regular,
+    Directory,
 }
 
-#[derive(Copy, Clone)]
-#[repr(C)]
-pub struct VfsNode {
-    pub used: u8,
-    pub node_type: u8,
-    pub name: [u8; 32],
-    pub size: u32,
-    pub parent: *mut VfsNode,
-    pub child: *mut VfsNode,
-    pub sibling: *mut VfsNode,
+#[derive(Clone)]
+struct FileEntry {
+    name: String,
+    file_type: FileType,
+    data: Vec<u8>,
+    children: BTreeMap<String, FileEntry>,
 }
 
-const MAX_FILES: usize = 32;
-static mut NODES: [VfsNode; MAX_FILES] = [VfsNode {
-    used: 0,
-    node_type: 0,
-    name: [0; 32],
-    size: 0,
-    parent: core::ptr::null_mut(),
-    child: core::ptr::null_mut(),
-    sibling: core::ptr::null_mut(),
-}; MAX_FILES];
-
-const ENOENT: i32 = -2;
-const EEXIST: i32 = -17;
-const EINVAL: i32 = -22;
-const ENOSPC: i32 = -28;
-
-static mut ROOT_PTR: *mut VfsNode = core::ptr::null_mut();
-
-// Helper: Find a free node slot
-unsafe fn alloc_node() -> Option<&'static mut VfsNode> {
-    for n in NODES.iter_mut() {
-        if n.used == 0 {
-            n.used = 1;
-            return Some(n);
-        }
-    }
-    None
-}
-
-// Helper: Compare node name
-fn name_eq(a: &[u8], b: &[u8]) -> bool {
-    let a_end = a.iter().position(|&c| c == 0).unwrap_or(a.len());
-    let b_end = b.iter().position(|&c| c == 0).unwrap_or(b.len());
-    &a[..a_end] == &b[..b_end]
-}
-
-// Helper: Find child by name
-unsafe fn find_child(parent: *mut VfsNode, name: &[u8]) -> Option<*mut VfsNode> {
-    if parent.is_null() { return None; }
-    let mut child = (*parent).child;
-    while !child.is_null() {
-        if name_eq(&(*child).name, name) {
-            return Some(child);
-        }
-        child = (*child).sibling;
-    }
-    None
-}
-
-// Helper: Parse path and walk tree
-unsafe fn walk_path(path: &str) -> Option<*mut VfsNode> {
-    if path == "/" { return Some(ROOT_PTR); }
-    let mut node = ROOT_PTR;
-    let mut parts = path.trim_start_matches('/').split('/');
-    while let Some(part) = parts.next() {
-        if part.is_empty() { continue; }
-        let mut name = [0u8; 32];
-        let bytes = part.as_bytes();
-        let len = bytes.len().min(31);
-        name[..len].copy_from_slice(&bytes[..len]);
-        name[len] = 0;
-        match find_child(node, &name) {
-            Some(child) => node = child,
-            None => return None,
-        }
-    }
-    Some(node)
-}
-
-// Helper function to safely convert C string to Rust string
-unsafe fn c_str_to_rust(path_ptr: *const u8) -> &'static str {
-    if path_ptr.is_null() {
-        return "";
-    }
-    
-    let mut len = 0;
-    let mut ptr = path_ptr;
-    while *ptr != 0 {
-        len += 1;
-        ptr = ptr.add(1);
-        if len > 256 { // Safety limit
-            break;
-        }
-    }
-    
-    if len == 0 {
-        return "";
-    }
-    
-    // Create a slice from the C string
-    let slice = core::slice::from_raw_parts(path_ptr, len);
-    core::str::from_utf8(slice).unwrap_or("")
-}
-
-#[no_mangle]
-pub extern "C" fn rust_vfs_get_root() -> *mut VfsNode {
-    unsafe {
-        if ROOT_PTR.is_null() {
-            return core::ptr::null_mut();
-        }
-        ROOT_PTR
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn rust_vfs_init() -> i32 {
-    unsafe {
-        serial_write(b"[RUST VFS] rust_vfs_init called\n\0".as_ptr());
-        for i in 0..MAX_FILES {
-            NODES[i].used = 0;
-            NODES[i].node_type = 0;
-            NODES[i].name = [0; 32];
-            NODES[i].size = 0;
-            NODES[i].parent = core::ptr::null_mut();
-            NODES[i].child = core::ptr::null_mut();
-            NODES[i].sibling = core::ptr::null_mut();
-        }
-        NODES[0].used = 1;
-        NODES[0].node_type = 1; // Directory
-        NODES[0].name[0] = b'/';
-        NODES[0].size = 0;
-        NODES[0].parent = core::ptr::null_mut();
-        NODES[0].child = core::ptr::null_mut();
-        NODES[0].sibling = core::ptr::null_mut();
-        ROOT_PTR = &mut NODES[0];
-        serial_write(b"[RUST VFS] Node array initialized, root set\n\0".as_ptr());
-        vga_print(b"[RUST VFS] Node array initialized, root set\n\0".as_ptr());
-    }
-    0
-}
-
-#[no_mangle]
-pub extern "C" fn rust_vfs_mkdir(path_ptr: *const u8) -> i32 {
-    unsafe {
-        let path = c_str_to_rust(path_ptr);
-        if path.is_empty() || path == "/" { return EEXIST; }
-        let (parent_path, new_name) = match path.rfind('/') {
-            Some(idx) if idx > 0 => (&path[..idx], &path[idx+1..]),
-            Some(_) => ("/", &path[1..]),
-            None => ("/", path),
+impl FileEntry {
+    fn new_file(name: String) -> Self {
+        let entry = FileEntry {
+            name,
+            file_type: FileType::Regular,
+            data: Vec::new(),
+            children: BTreeMap::new(),
         };
-        let parent = walk_path(parent_path).unwrap_or(core::ptr::null_mut());
-        if parent.is_null() { return ENOENT; }
-        let mut name = [0u8; 32];
-        let bytes = new_name.as_bytes();
-        let len = bytes.len().min(31);
-        name[..len].copy_from_slice(&bytes[..len]);
-        name[len] = 0;
-        if find_child(parent, &name).is_some() { return EEXIST; }
-        let node = match alloc_node() {
-            Some(n) => n,
-            None => return ENOSPC,
-        };
-        node.node_type = VfsNodeType::Dir as u8;
-        node.size = 0;
-        node.parent = parent;
-        node.child = core::ptr::null_mut();
-        node.sibling = (*parent).child;
-        node.name = name;
-        (*parent).child = node as *mut VfsNode;
-        0
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn rust_vfs_ls(path_ptr: *const u8) -> i32 {
-    unsafe {
-        let path = c_str_to_rust(path_ptr);
-        let node = walk_path(path).unwrap_or(core::ptr::null_mut());
-        if node.is_null() { return ENOENT; }
-        if (*node).node_type != VfsNodeType::Dir as u8 { return EINVAL; }
-        vga_print(b"  .\n\0".as_ptr());
-        vga_print(b"  ..\n\0".as_ptr());
-        let mut child = (*node).child;
-        while !child.is_null() {
-            let name = &(*child).name;
-            let mut buf = [0u8; 34];
-            buf[..2].copy_from_slice(b"  ");
-            let mut i = 2;
-            for &c in name.iter() {
-                if c == 0 { break; }
-                buf[i] = c;
-                i += 1;
+        let ptr = &entry as *const _ as usize;
+        let mut buf = [b'V', b'F', b'S', b'-', b'A', b'L', b'L', b'O', b'C', b':', b' ', b'0', b'x', b'0', b'0', b'0', b'0', b'0', b'0', b'0', b'0', b'\r', b'\n', 0];
+        let mut addr = ptr;
+        for i in (11..19).rev() {
+            if i < buf.len() - 3 {
+                let digit = (addr & 0xF) as u8;
+                buf[i] = if digit < 10 { b'0' + digit } else { b'a' + (digit - 10) };
             }
-            buf[i] = b'\n';
-            buf[i+1] = 0;
-            vga_print(buf.as_ptr());
-            child = (*child).sibling;
+            addr >>= 4;
         }
-        0
+        unsafe { serial_write(buf.as_ptr()); }
+        entry
+    }
+    
+    fn new_directory(name: String) -> Self {
+        let entry = FileEntry {
+            name,
+            file_type: FileType::Directory,
+            data: Vec::new(),
+            children: BTreeMap::new(),
+        };
+        let ptr = &entry as *const _ as usize;
+        let mut buf = [b'V', b'F', b'S', b'-', b'A', b'L', b'L', b'O', b'C', b':', b' ', b'0', b'x', b'0', b'0', b'0', b'0', b'0', b'0', b'0', b'0', b'\r', b'\n', 0];
+        let mut addr = ptr;
+        for i in (11..19).rev() {
+            if i < buf.len() - 3 {
+                let digit = (addr & 0xF) as u8;
+                buf[i] = if digit < 10 { b'0' + digit } else { b'a' + (digit - 10) };
+            }
+            addr >>= 4;
+        }
+        unsafe { serial_write(buf.as_ptr()); }
+        entry
     }
 }
 
-#[no_mangle]
-pub extern "C" fn rust_vfs_create_file(path_ptr: *const u8) -> i32 {
+static mut ROOT_FS: Option<FileEntry> = None;
+
+pub fn init() {
     unsafe {
-        let path = c_str_to_rust(path_ptr);
-        if path.is_empty() || path == "/" { return EEXIST; }
-        let (parent_path, new_name) = match path.rfind('/') {
-            Some(idx) if idx > 0 => (&path[..idx], &path[idx+1..]),
-            Some(_) => ("/", &path[1..]),
-            None => ("/", path),
-        };
-        let parent = walk_path(parent_path).unwrap_or(core::ptr::null_mut());
-        if parent.is_null() { return ENOENT; }
-        let mut name = [0u8; 32];
-        let bytes = new_name.as_bytes();
-        let len = bytes.len().min(31);
-        name[..len].copy_from_slice(&bytes[..len]);
-        name[len] = 0;
-        if find_child(parent, &name).is_some() { return EEXIST; }
-        let node = match alloc_node() {
-            Some(n) => n,
-            None => return ENOSPC,
-        };
-        node.node_type = VfsNodeType::File as u8;
-        node.size = 0;
-        node.parent = parent;
-        node.child = core::ptr::null_mut();
-        node.sibling = (*parent).child;
-        node.name = name;
-        (*parent).child = node as *mut VfsNode;
-        0
+        serial_write(b"[VFS] Initializing virtual file system\n\0".as_ptr());
+        ROOT_FS = Some(FileEntry::new_directory("/".to_string()));
+        serial_write(b"[VFS] Virtual file system initialized\n\0".as_ptr());
     }
 }
 
-#[no_mangle]
-pub extern "C" fn rust_vfs_unlink(path_ptr: *const u8) -> i32 {
+fn get_path_components(path: *const u8) -> Vec<String> {
+    if path.is_null() {
+        return Vec::new();
+    }
+    
+    let mut components = Vec::new();
+    let mut current = String::new();
+    let mut i = 0;
+    
     unsafe {
-        let path = c_str_to_rust(path_ptr);
-        if path.is_empty() || path == "/" { return EINVAL; }
-        let (parent_path, del_name) = match path.rfind('/') {
-            Some(idx) if idx > 0 => (&path[..idx], &path[idx+1..]),
-            Some(_) => ("/", &path[1..]),
-            None => ("/", path),
-        };
-        let parent = walk_path(parent_path).unwrap_or(core::ptr::null_mut());
-        if parent.is_null() { return ENOENT; }
-        let mut name = [0u8; 32];
-        let bytes = del_name.as_bytes();
-        let len = bytes.len().min(31);
-        name[..len].copy_from_slice(&bytes[..len]);
-        name[len] = 0;
-        let mut prev: *mut VfsNode = core::ptr::null_mut();
-        let mut child = (*parent).child;
-        while !child.is_null() {
-            if name_eq(&(*child).name, &name) {
-                if prev.is_null() {
-                    (*parent).child = (*child).sibling;
-                } else {
-                    (*prev).sibling = (*child).sibling;
+        loop {
+            let c = *path.add(i);
+            if c == 0 {
+                break;
+            }
+            
+            if c == b'/' {
+                if !current.is_empty() {
+                    components.push(current.clone());
+                    current.clear();
                 }
-                (*child).used = 0;
-                return 0;
+            } else {
+                current.push(c as char);
             }
-            prev = child;
-            child = (*child).sibling;
+            
+            i += 1;
         }
-        ENOENT
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn rust_vfs_stat(path_ptr: *const u8, stat_out: *mut VfsNode) -> i32 {
-    unsafe {
-        let path = c_str_to_rust(path_ptr);
-        let node = walk_path(path).unwrap_or(core::ptr::null_mut());
-        if node.is_null() { return ENOENT; }
-        if !stat_out.is_null() {
-            *stat_out = *node;
-        }
-        0
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn rust_vfs_read(path_ptr: *const u8, buf_ptr: *mut u8, max_len: i32) -> i32 {
-    unsafe {
-        let _path = c_str_to_rust(path_ptr);
-        vga_print(path_ptr);
-        vga_print(b"\n\0".as_ptr());
-        serial_write(b"[RUST VFS] read called\n\0".as_ptr());
         
-        // For now, just return a dummy message
-        if !buf_ptr.is_null() && max_len > 0 {
-            let dummy_msg = b"File content placeholder\n";
-            let copy_len = core::cmp::min(max_len as usize, dummy_msg.len());
-            core::ptr::copy_nonoverlapping(dummy_msg.as_ptr(), buf_ptr, copy_len);
-            return copy_len as i32;
+        if !current.is_empty() {
+            components.push(current);
         }
     }
-    // Stub: return error
+    
+    components
+}
+
+fn find_entry(path: *const u8) -> Option<&'static mut FileEntry> {
+    unsafe {
+        if let Some(ref mut root) = ROOT_FS {
+            let components = get_path_components(path);
+            
+            if components.is_empty() {
+                return Some(root);
+            }
+            
+            let mut current = root;
+            for component in components {
+                if let Some(child) = current.children.get_mut(&component) {
+                    current = child;
+                } else {
+                    return None;
+                }
+            }
+            
+            Some(current)
+        } else {
+            None
+        }
+    }
+}
+
+fn find_parent_and_name(path: *const u8) -> Option<(&'static mut FileEntry, String)> {
+    let components = get_path_components(path);
+    if components.is_empty() {
+        return None;
+    }
+    
+    let filename = components.last().unwrap().clone();
+    let parent_components = &components[..components.len() - 1];
+    
+    unsafe {
+        if let Some(ref mut root) = ROOT_FS {
+            let mut current = root;
+            
+            for component in parent_components {
+                if let Some(child) = current.children.get_mut(component) {
+                    current = child;
+                } else {
+                    return None;
+                }
+            }
+            
+            Some((current, filename))
+        } else {
+            None
+        }
+    }
+}
+
+pub fn create_file(path: *const u8) -> i32 {
+    if let Some((parent, filename)) = find_parent_and_name(path) {
+        if parent.children.contains_key(&filename) {
+            return -17; // File exists
+        }
+        
+        parent.children.insert(filename.clone(), FileEntry::new_file(filename));
+        0
+    } else {
+        -2 // No such file or directory
+    }
+}
+
+pub fn create_directory(path: *const u8) -> i32 {
+    if let Some((parent, dirname)) = find_parent_and_name(path) {
+        if parent.children.contains_key(&dirname) {
+            return -17; // Directory exists
+        }
+        
+        parent.children.insert(dirname.clone(), FileEntry::new_directory(dirname));
+        0
+    } else {
+        -2 // No such file or directory
+    }
+}
+
+pub fn delete_file(path: *const u8) -> i32 {
+    if let Some((parent, filename)) = find_parent_and_name(path) {
+        if parent.children.remove(&filename).is_some() {
+            0
+        } else {
+            -2 // No such file or directory
+        }
+    } else {
+        -2 // No such file or directory
+    }
+}
+
+pub fn read_file(path: *const u8, buf: *mut u8, max_len: i32) -> i32 {
+    if buf.is_null() || max_len <= 0 {
+        return -22; // Invalid argument
+    }
+    
+    if let Some(entry) = find_entry(path) {
+        match entry.file_type {
+            FileType::Regular => {
+                let copy_len = core::cmp::min(entry.data.len(), max_len as usize);
+                unsafe {
+                    ptr::copy_nonoverlapping(entry.data.as_ptr(), buf, copy_len);
+                }
+                copy_len as i32
+            },
+            FileType::Directory => -21, // Is a directory
+        }
+    } else {
+        -2 // No such file or directory
+    }
+}
+
+pub fn write_file(path: *const u8, buf: *const u8, len: u64) -> u64 {
+    if buf.is_null() {
+        unsafe { serial_write(b"[VFS-DEBUG] write_file: buf is null\r\n\0".as_ptr()); }
+        return 0;
+    }
+    
+    if let Some(entry) = find_entry(path) {
+        match entry.file_type {
+            FileType::Regular => {
+                unsafe { serial_write(b"[VFS-DEBUG] write_file: clearing data\r\n\0".as_ptr()); }
+                entry.data.clear();
+                unsafe { serial_write(b"[VFS-DEBUG] write_file: reserving data\r\n\0".as_ptr()); }
+                entry.data.reserve(len as usize);
+                unsafe { serial_write(b"[VFS-DEBUG] write_file: pushing data\r\n\0".as_ptr()); }
+                for i in 0..len as usize {
+                    entry.data.push(unsafe { *buf.add(i) });
+                }
+                unsafe { serial_write(b"[VFS-DEBUG] write_file: done\r\n\0".as_ptr()); }
+                len
+            },
+            FileType::Directory => 0, // Can't write to directory
+        }
+    } else {
+        unsafe { serial_write(b"[VFS-DEBUG] write_file: file not found\r\n\0".as_ptr()); }
+        0 // File doesn't exist
+    }
+}
+
+pub fn list_directory(path: *const u8) -> i32 {
+    if let Some(entry) = find_entry(path) {
+        match entry.file_type {
+            FileType::Directory => {
+                for (name, child) in &entry.children {
+                    let type_char = match child.file_type {
+                        FileType::Directory => b'd',
+                        FileType::Regular => b'-',
+                    };
+                    
+                    unsafe {
+                        vga_print([type_char, 0].as_ptr());
+                        vga_print(b"rwxr-xr-x 1 root root ".as_ptr());
+                        
+                        // Print file size
+                        let size = child.data.len();
+                        let mut size_str = [0u8; 16];
+                        let mut temp_size = size;
+                        let mut i = 0;
+                        
+                        if temp_size == 0 {
+                            size_str[0] = b'0';
+                            i = 1;
+                        } else {
+                            while temp_size > 0 {
+                                size_str[i] = b'0' + (temp_size % 10) as u8;
+                                temp_size /= 10;
+                                i += 1;
+                            }
+                        }
+                        
+                        // Reverse digits
+                        for j in 0..i/2 {
+                            let temp = size_str[j];
+                            size_str[j] = size_str[i-1-j];
+                            size_str[i-1-j] = temp;
+                        }
+                        size_str[i] = 0;
+                        
+                        vga_print(size_str.as_ptr());
+                        vga_print(b" Jan  1 00:00 ".as_ptr());
+                        
+                        // Print filename
+                        for &byte in name.as_bytes() {
+                            vga_print([byte, 0].as_ptr());
+                        }
+                        vga_print(b"\n".as_ptr());
+                    }
+                }
+                0
+            },
+            FileType::Regular => -20, // Not a directory
+        }
+    } else {
+        -2 // No such file or directory
+    }
+}
+
+// C interface functions
+#[no_mangle]
+pub extern "C" fn rust_vfs_init() {
+    init();
+}
+
+#[no_mangle]
+pub extern "C" fn rust_vfs_create_file(path: *const u8) -> i32 {
+    create_file(path)
+}
+
+#[no_mangle]
+pub extern "C" fn rust_vfs_mkdir(path: *const u8) -> i32 {
+    create_directory(path)
+}
+
+#[no_mangle]
+pub extern "C" fn rust_vfs_unlink(path: *const u8) -> i32 {
+    delete_file(path)
+}
+
+#[no_mangle]
+pub extern "C" fn rust_vfs_read(path: *const u8, buf: *mut u8, max_len: i32) -> i32 {
+    read_file(path, buf, max_len)
+}
+
+#[no_mangle]
+pub extern "C" fn rust_vfs_write(path: *const u8, buf: *const u8, len: u64) -> u64 {
+    write_file(path, buf, len)
+}
+
+#[no_mangle]
+pub extern "C" fn rust_vfs_ls(path: *const u8) -> i32 {
+    list_directory(path)
+}
+
+#[no_mangle]
+pub extern "C" fn rust_vfs_stat(_path: *const u8, _statbuf: *mut u8) -> i32 {
+    // TODO: Implement stat logic
     -1
 }
 
 #[no_mangle]
-pub extern "C" fn rust_vfs_write(path_ptr: *const u8, _buf_ptr: *const u8, len: i32) -> i32 {
-    unsafe {
-        let _path = c_str_to_rust(path_ptr);
-        vga_print(path_ptr);
-        vga_print(b"\n\0".as_ptr());
-        serial_write(b"[RUST VFS] write called\n\0".as_ptr());
-    }
-    // Stub: always succeed (return bytes written)
-    len
-} 
+pub extern "C" fn rust_vfs_get_root() {
+    // TODO: Implement get_root logic
+}

@@ -6,6 +6,7 @@
 void serial_init();
 void serial_putchar(char c);
 int serial_getchar(); // Returns char or -1 if no data
-void serial_write(const char* str);
-void serial_write_hex(const char* label, uint64_t value);
+extern void serial_write(const char* str);
+void serial_write_hex(const char* label, unsigned long val);
+void serial_write_dec(const char* label, unsigned long val);
 #endif 

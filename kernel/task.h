@@ -9,15 +9,15 @@
 typedef enum { TASK_RUNNING, TASK_READY, TASK_BLOCKED, TASK_TERMINATED } task_state_t;
 
 typedef struct task {
-  uint64_t rsp; // Stack pointer
-  uint64_t rip; // Instruction pointer (for new tasks)
-  uint8_t stack[TASK_STACK_SIZE];
-  task_state_t state;
-  int id;
-  int user_mode; // 1=user, 0=kernel
+    uint64_t rsp; // Stack pointer
+    uint64_t rip; // Instruction pointer (for new tasks)
+    uint8_t stack[TASK_STACK_SIZE];
+    task_state_t state;
+    int id;
+    int user_mode; // 1=user, 0=kernel
   int priority; // Lower value = higher priority
   uint64_t cr3; // Per-process page table (PML4) physical address
-  struct task* next;
+    struct task* next;
 } task_t;
 
 extern task_t* current;
@@ -38,4 +38,4 @@ void rust_scheduler_tick();
 }
 #endif
 
-#endif
+#endif 

@@ -1,6 +1,7 @@
 #ifndef KERNEL_H
 #define KERNEL_H
 
+#include "vfs.h"
 // Standard integer types
 typedef unsigned char uint8_t;
 typedef unsigned short uint16_t;
@@ -19,6 +20,8 @@ void vga_clear(void);
 void vga_print(const char* str);
 void vga_putchar(char c);
 void vga_set_color(uint8_t color);
+// VGA hex print prototype
+void vga_print_hex(unsigned long val);
 
 // GDT functions
 void gdt_init(void);
@@ -54,19 +57,35 @@ void parse_multiboot2_memory_map(uint64_t mb2_info_ptr);
 
 void kernel_main(uint64_t mb2_info_ptr);
 
+// ELF loader C stub
+int elf_load(const char* path);
+
 // --- Rust VFS FFI Declarations ---
 // These functions will be implemented in Rust and called from C
 extern int rust_vfs_init();
 extern int rust_vfs_ls(const char* path);
 extern int rust_vfs_read(const char* path, void* buf, int max_len);
-extern int rust_vfs_write(const char* path, const void* buf, int len);
+extern uint64_t rust_vfs_write(const char* path, const void* buf, uint64_t len);
 extern int rust_vfs_mkdir(const char* path);
 extern int rust_vfs_create_file(const char* path);
 extern int rust_vfs_unlink(const char* path);
-extern int rust_vfs_stat(const char* path, void* stat_out);
 
 // --- Rust Keyboard FFI Declarations ---
 extern void rust_keyboard_put_scancode(uint8_t scancode);
 extern int rust_keyboard_get_char(); // Returns char or -1 if no data
+
+// --- Rust ELF Loader FFI Declaration ---
+extern int rust_elf_load(const char* path);
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+// --- Rust VGA FFI Declarations ---
+extern void rust_vga_print(const char* s);
+extern void rust_vga_set_color(unsigned char color);
+extern void rust_vga_clear();
+#ifdef __cplusplus
+}
+#endif
 
 #endif
