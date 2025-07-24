@@ -30,8 +30,3 @@ Implement kernel debugging and tracing infrastructure: printk, dmesg, kprobes, f
 Pending
 Add support for containers and virtualization: namespaces, cgroups, KVM, LXC, Docker.
 Pending
-
-
-okay so help me resolve kernel crash which is happening right after "[BOOT] Starting Bash shell." i deduced that error might be with either serial_write or vga_print as at some places vga_print was causing crashes and crashes were gone as soon as i commented vga_prints
-but here serial_write is the only way to check if the code worked or not so cant comment it out
-i also cant find any error as the point where crash is occuring doesnt even has a vga_print and serial write issue doesnt seem to be problem still check it thourogly
