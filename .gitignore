@@ -11,8 +11,8 @@
 *.tmp
 *.swp
 *.swo
-/todo.txt
 *.d
+/todo.txt
 *.dSYM/
 *.DS_Store
 *.vscode/
