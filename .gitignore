@@ -12,6 +12,7 @@
 *.swp
 *.swo
 *.d
+*.iso
 /todo.txt
 *.dSYM/
 *.DS_Store
