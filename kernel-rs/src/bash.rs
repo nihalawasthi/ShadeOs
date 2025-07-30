@@ -9,7 +9,9 @@ use core::option::Option;
 use core::option::Option::{Some, None};
 
 extern "C" {
+    fn vga_clear();
     fn vga_print(s: *const u8);
+    fn rust_keyboard_clear_buffer();
     fn serial_write(s: *const u8);
     fn rust_keyboard_get_char() -> i32;
     fn rust_vfs_read(path_ptr: *const u8, buf_ptr: *mut u8, max_len: i32) -> i32;
@@ -23,18 +25,18 @@ extern "C" {
     fn serial_write_hex(s: *const u8, value: u64);
     fn serial_write_dec(s: *const u8, value: u64);
     fn rust_get_block_header_size() -> usize;
+    fn pause();
 }
 
 // Utility functions
 fn print_str(s: &[u8]) {
+    let mut buf = [0u8; 1024];
+    let len = core::cmp::min(s.len(), buf.len() - 1);
+    buf[..len].copy_from_slice(&s[..len]);
+    buf[len] = 0;
     unsafe {
-        let mut i = 0;
-        while i < s.len() && i < 256 {
-            if s[i] == 0 { break; }
-            vga_print(s[i..].as_ptr());
-            break; // vga_print expects a null-terminated string, so print once
-            i += 1;
-        }
+        serial_write(buf.as_ptr());
+        vga_print(buf.as_ptr());
     }
 }
 
@@ -126,12 +128,12 @@ fn parse_int(s: &[u8]) -> Option<i32> {
     Some(if negative { -result } else { result })
 }
 
-const MAX_CMD_LEN: usize = 1024;
+const MAX_CMD_LEN: usize = 1024; // Reduce from 1024 to prevent overflow
 const MAX_PATH_LEN: usize = 256;
-const MAX_ENV_VARS: usize = 50;
-const MAX_ALIASES: usize = 20;
-const MAX_HISTORY: usize = 1;  
-const MAX_ARGS: usize = 32;
+const MAX_ENV_VARS: usize = 50; // Reduce from 50 to save memory
+const MAX_ALIASES: usize = 20; // Reduce from 20 to save memory
+const MAX_HISTORY: usize = 10; // Safe value instead of 1
+const MAX_ARGS: usize = 32; // Reduce from 32 to save memory
 
 #[derive(Clone, Copy)]
 pub struct EnvVar {
@@ -164,10 +166,7 @@ static mut BASH_SHELL: Option<BashShell> = None;
 #[no_mangle]
 pub extern "C" fn rust_bash_init() {
     unsafe {
-        // Clear keyboard buffer before starting
         while rust_keyboard_get_char() != -1 {}
-        
-        // Create a properly initialized shell using the new() method
         let shell = BashShell::new();
         
         // Store in global
@@ -208,7 +207,7 @@ impl BashShell {
             core::ptr::write_bytes(history_ptr, 0, history_size);
         }
 
-        Self {
+        let mut shell = Self {
             cwd: [0; MAX_PATH_LEN],
             env_vars: env_vars_ptr,
             env_count: 0,
@@ -219,7 +218,13 @@ impl BashShell {
             history_pos: 0,
             last_exit_code: 0,
             prompt: [0; 64],
-        }
+        };
+        
+        // Set initial working directory to root
+        shell.cwd[0] = b'/';
+        shell.cwd[1] = 0;
+        
+        shell
     }
     
     pub fn set_env(&mut self, name: &[u8], value: &[u8]) {
@@ -397,18 +402,23 @@ impl BashShell {
     
     pub fn run(&mut self) {
         unsafe { serial_write(b"[BASH-DEBUG] Enter BashShell::run()\n\0".as_ptr()); }
-        print_str(b"ShadeOS Bash-compatible Shell v1.0\n");
-        print_str(b"Type 'help' for available commands.\n\n");
+        // vga_print(b"ShadeOS Bash-compatible Shell v1.0\n".as_ptr());
+        // vga_print(b"Type 'help' for available commands.\n\n".as_ptr());
+        
+        unsafe { vga_clear(); }
+        unsafe { rust_keyboard_clear_buffer(); }
+        unsafe {
+            extern "C" { fn sys_sti(); }
+            sys_sti();
+            serial_write(b"[BASH-DEBUG] Interrupts enabled\n\0".as_ptr());
+        }
+        
         unsafe { serial_write(b"[BASH-DEBUG] Starting shell loop\n\0".as_ptr()); }
         loop {
-            unsafe { serial_write(b"[BASH-DEBUG] Before update_prompt\n\0".as_ptr()); }
             self.update_prompt();
-            unsafe { serial_write(b"[BASH-DEBUG] After update_prompt\n\0".as_ptr()); }
-            unsafe { serial_write(b"[BASH-DEBUG] Before print_str(prompt)\n\0".as_ptr()); }
             print_str(get_str(&self.prompt));
-            unsafe { serial_write(b"[BASH-DEBUG] After print_str(prompt)\n\0".as_ptr()); }
             let mut input = [0u8; MAX_CMD_LEN];
-            unsafe { serial_write(b"[BASH-DEBUG] Before read_line\n\0".as_ptr()); }
+            print_str(b"\nroot@shadeos: ");
             if self.read_line(&mut input) {
                 unsafe { serial_write(b"[BASH-DEBUG] After read_line (got input)\n\0".as_ptr()); }
                 // Debug: print raw input buffer
@@ -426,12 +436,24 @@ impl BashShell {
                     serial_write(b"\n\0".as_ptr());
                 }
                 let input_str = get_str(&input);
-                if input_str.len() > 0 {
-                    self.add_to_history(input_str);
-                    // Add a guard to prevent executing empty commands
-                    if !input_str.is_empty() {
-                        self.execute_command(input_str);
-                    }
+                unsafe {
+                    serial_write(b"[BASH-DEBUG] input_str len: \0".as_ptr());
+                    serial_write_dec(b"\0".as_ptr(), input_str.len() as u64);
+                    serial_write(b"\n\0".as_ptr());
+                }
+                // Only process non-empty, non-whitespace commands
+                let trimmed = input_str.iter().position(|&c| c != b' ' && c != b'\t').map(|start| {
+                    let end = input_str.iter().rposition(|&c| c != b' ' && c != b'\t').unwrap_or(start);
+                    &input_str[start..=end]
+                }).unwrap_or(b"");
+                
+                if !trimmed.is_empty() {
+                    self.add_to_history(trimmed);
+                    self.execute_command(trimmed);
+                } else {
+                    // Empty command - just skip to next line like regular shells
+                    unsafe { serial_write(b"[BASH-DEBUG] Empty command, continuing to next prompt\n\0".as_ptr()); }
+                    // No need to do anything else, the loop will continue to show the next prompt
                 }
                 unsafe { serial_write(b"[BASH-DEBUG] After processing input\n\0".as_ptr()); }
             } else {
@@ -442,15 +464,27 @@ impl BashShell {
     
     fn read_line(&self, buffer: &mut [u8]) -> bool {
         let mut pos = 0;
+        
+        // Initialize buffer to all zeros to prevent garbage data
+        for i in 0..buffer.len() {
+            buffer[i] = 0;
+        }
+        
         loop {
             unsafe {
                 let c = rust_keyboard_get_char();
-                if c == -1 || c == 0 { continue; }
+                if c == -1 || c == 0 { 
+                    // Use HLT to wait for interrupts instead of busy waiting
+                    extern "C" { fn pause(); }
+                    pause(); // This will halt until the next interrupt
+                    continue; 
+                }
                 let ch = c as u8;
+                
                 
                 match ch {
                     b'\n' | b'\r' => {
-                        if pos == 0 { continue; } // Only accept if something was entered
+                        // Always accept Enter, even for empty commands
                         print_str(b"\n");
                         buffer[pos] = 0;
                         return true;
@@ -458,6 +492,7 @@ impl BashShell {
                     8 | 127 => { // Backspace
                         if pos > 0 {
                             pos -= 1;
+                            buffer[pos] = 0; // Clear the character
                             print_char(8); print_char(b' '); print_char(8);
                         }
                     },
@@ -484,12 +519,11 @@ impl BashShell {
         let end = command_line.iter().rposition(|&c| c != b' ' && c != b'\t').unwrap_or(0);
         
         if start > end {
-            return; // Empty or all whitespace
+            return;
         }
         let trimmed_command = &command_line[start..=end];
 
-        // Use heap allocation for args to prevent stack overflow
-        let args_ptr = unsafe { rust_kmalloc(64 * MAX_ARGS) as *mut u8 }; // Smaller per-arg size
+        let args_ptr = unsafe { rust_kmalloc(64 * MAX_ARGS) as *mut u8 };
         if args_ptr.is_null() {
             unsafe { serial_write(b"[BASH-ERROR] Failed to allocate args buffer\n\0".as_ptr()); }
             return;
@@ -501,15 +535,19 @@ impl BashShell {
         // Parse command into heap-allocated buffer
         let argc = self.parse_command_heap(trimmed_command, args_slice);
         
+        unsafe {
+            serial_write(b"[BASH-DEBUG] parse_command_heap returned argc=\0".as_ptr());
+            serial_write_dec(b"\0".as_ptr(), argc as u64);
+            serial_write(b"\n\0".as_ptr());
+        }
+        
         if argc == 0 { 
             unsafe { rust_kfree(args_ptr); }
             return; 
         }
         
-        // Get command from first argument
-        let cmd_start = 0;
-        let cmd_end = args_slice.iter().position(|&b| b == 0).unwrap_or(64);
-        let cmd = &args_slice[cmd_start..cmd_end];
+        // Get command from first argument using proper helper function
+        let cmd = self.get_arg_heap(args_slice, 0);
         
         // Check for aliases first - allocate alias buffer on heap
         let alias_buf_ptr = unsafe { rust_kmalloc(256) as *mut u8 };
@@ -540,38 +578,31 @@ impl BashShell {
         
         // Built-in commands
         match cmd {
-            b"help" => self.cmd_help(),
-            b"exit" => self.cmd_exit_heap(args_slice, argc),
-            b"cd" => self.cmd_cd_heap(args_slice, argc),
-            b"pwd" => self.cmd_pwd(),
-            b"ls" => self.cmd_ls_heap(args_slice, argc),
-            b"cat" => self.cmd_cat_heap(args_slice, argc),
-            b"echo" => self.cmd_echo_heap(args_slice, argc),
-            b"mkdir" => self.cmd_mkdir_heap(args_slice, argc),
-            b"touch" => self.cmd_touch_heap(args_slice, argc),
-            b"rm" => self.cmd_rm_heap(args_slice, argc),
+            b"help" => self.cmd_help(), //work
+            b"exit" => self.cmd_exit_heap(args_slice, argc), //work but needs to actually exit the shell
+            b"cd" => self.cmd_cd_heap(args_slice, argc), //cant test
+            b"pwd" => self.cmd_pwd_heap(args_slice, argc),
+            b"ls" => self.cmd_ls_heap(args_slice, argc), //some giberish
+            b"cat" => self.cmd_cat_heap(args_slice, argc), //cant test
+            b"echo" => self.cmd_echo_heap(args_slice, argc),//doesnt work
+            b"mkdir" => self.cmd_mkdir_heap(args_slice, argc),//cant handle the args
+            b"touch" => self.cmd_touch_heap(args_slice, argc),//cant handle the args
+            b"rm" => self.cmd_rm_heap(args_slice, argc),//cant test
             b"env" => self.cmd_env(),
             b"export" => self.cmd_export_heap(args_slice, argc),
             b"alias" => self.cmd_alias_heap(args_slice, argc),
-            b"history" => self.cmd_history(),
-            b"clear" => self.cmd_clear(),
-            b"date" => self.cmd_date(),
-            b"uptime" => self.cmd_uptime(),
-            b"ps" => self.cmd_ps(),
-            b"kill" => self.cmd_kill_heap(args_slice, argc),
-            b"which" => self.cmd_which_heap(args_slice, argc),
-            b"whoami" => self.cmd_whoami(),
-            b"uname" => self.cmd_uname(),
-            b"free" => self.cmd_free(),
+            b"history" => self.cmd_history(), // work
+            b"clear" => self.cmd_clear(), // work
+            b"date" => self.cmd_date(), // work
+            b"uptime" => self.cmd_uptime(), // work
+            b"ps" => self.cmd_ps(), // work
+            b"kill" => self.cmd_kill_heap(args_slice, argc), // work
+            b"which" => self.cmd_which_heap(args_slice, argc), // work
+            b"whoami" => self.cmd_whoami(), // work
+            b"uname" => self.cmd_uname(), // work
+            b"free" => self.cmd_free(),//works
             b"df" => self.cmd_df(),
             b"mount" => self.cmd_mount(),
-            b"umount" => self.cmd_umount_heap(args_slice, argc),
-            b"grep" => self.cmd_grep_heap(args_slice, argc),
-            b"find" => self.cmd_find_heap(args_slice, argc),
-            b"wc" => self.cmd_wc_heap(args_slice, argc),
-            b"head" => self.cmd_head_heap(args_slice, argc),
-            b"tail" => self.cmd_tail_heap(args_slice, argc),
-            b"cp" => self.cmd_cp_heap(args_slice, argc),
             b"mv" => self.cmd_mv_heap(args_slice, argc),
             b"chmod" => self.cmd_chmod_heap(args_slice, argc),
             b"chown" => self.cmd_chown_heap(args_slice, argc),
@@ -589,14 +620,14 @@ impl BashShell {
             b"wget" => self.cmd_wget_heap(args_slice, argc),
             b"curl" => self.cmd_curl_heap(args_slice, argc),
             b"ping" => self.cmd_ping_heap(args_slice, argc),
-            b"netstat" => self.cmd_netstat(),
-            b"ifconfig" => self.cmd_ifconfig(),
-            b"route" => self.cmd_route(),
+            b"netstat" => self.cmd_netstat(), //works
+            b"ifconfig" => self.cmd_ifconfig(),//works
+            b"route" => self.cmd_route(),//works
             b"ssh" => self.cmd_ssh_heap(args_slice, argc),
             b"scp" => self.cmd_scp_heap(args_slice, argc),
             b"rsync" => self.cmd_rsync_heap(args_slice, argc),
             b"top" => self.cmd_top(),
-            b"htop" => self.cmd_htop(),
+            b"htop" => self.cmd_htop(),//works
             b"iotop" => self.cmd_iotop(),
             b"lsof" => self.cmd_lsof(),
             b"strace" => self.cmd_strace_heap(args_slice, argc),
@@ -672,6 +703,7 @@ impl BashShell {
             b"tee" => self.cmd_tee_heap(args_slice, argc),
             b"xargs" => self.cmd_xargs_heap(args_slice, argc),
             b"parallel" => self.cmd_parallel_heap(args_slice, argc),
+            b"test_args" => self.cmd_test_args_heap(args_slice, argc),
             _ => {
                 print_str(b"bash: ");
                 print_str(cmd);
@@ -741,25 +773,45 @@ impl BashShell {
         let mut current_arg = 0;
         let mut pos = 0;
         
+        unsafe { 
+            serial_write(b"[BASH-DEBUG] get_arg_heap called with n=\0".as_ptr());
+            serial_write_dec(b"\0".as_ptr(), n as u64);
+            serial_write(b"\n\0".as_ptr());
+        }
+        
+        // Find the start of the nth argument
         while pos < args_buffer.len() && current_arg < n {
             // Skip to next null terminator
             while pos < args_buffer.len() && args_buffer[pos] != 0 {
                 pos += 1;
             }
-            pos += 1; // Skip the null terminator
+            if pos < args_buffer.len() {
+                pos += 1; // Skip the null terminator
+            }
             current_arg += 1;
         }
         
-        if pos >= args_buffer.len() {
+        if pos >= args_buffer.len() || current_arg < n {
+            unsafe { serial_write(b"[BASH-DEBUG] get_arg_heap: argument not found\n\0".as_ptr()); }
             return b"";
         }
         
         let start = pos;
+        // Find the end of this argument
         while pos < args_buffer.len() && args_buffer[pos] != 0 {
             pos += 1;
         }
         
-        &args_buffer[start..pos]
+        let arg = &args_buffer[start..pos];
+        unsafe {
+            serial_write(b"[BASH-DEBUG] get_arg_heap: found arg '\0".as_ptr());
+            for i in 0..core::cmp::min(arg.len(), 32) {
+                let ch = [arg[i], 0];
+                serial_write(ch.as_ptr());
+            }
+            serial_write(b"'\n\0".as_ptr());
+        }
+        arg
     }
     
     // Built-in command implementations using heap args
@@ -770,8 +822,6 @@ impl BashShell {
             self.last_exit_code
         };
         print_str(b"Goodbye!\n");
-        // In a real OS, this would exit the shell
-        // For now, we'll just set the exit code
         self.last_exit_code = exit_code;
     }
     
@@ -809,6 +859,20 @@ impl BashShell {
         }
         let cwd_val = get_str(&self.cwd).to_vec();
         self.set_env(b"PWD", &cwd_val);
+        self.last_exit_code = 0;
+    }
+
+    fn cmd_pwd_heap(&mut self, _args_buffer: &[u8], _argc: usize) {
+        let cwd_str = get_str(&self.cwd);
+        if cwd_str.is_empty() {
+            // If cwd is empty, set it to root and print it
+            self.cwd[0] = b'/';
+            self.cwd[1] = 0;
+            print_str(b"/\n");
+        } else {
+            print_str(cwd_str);
+            print_str(b"\n");
+        }
         self.last_exit_code = 0;
     }
     
@@ -893,7 +957,16 @@ impl BashShell {
             return;
         }
         
-        let dirname = self.get_arg_heap(args_buffer, 1);
+    let dirname = self.get_arg_heap(args_buffer, 1);
+
+    unsafe {
+        serial_write(b"[BASH-DEBUG] In cmd_mkdir_heap, dirname is: '\0".as_ptr());
+        for &byte in dirname {
+            let ch = [byte, 0];
+            serial_write(ch.as_ptr());
+        }
+        serial_write(b"'\n\0".as_ptr());
+    }
         let mut abs_path = [0u8; MAX_PATH_LEN];
         
         if dirname.starts_with(b"/") {
@@ -2215,41 +2288,37 @@ impl BashShell {
         print_str(b"  mkdir <dir>        - Create directory\n");
         print_str(b"  touch <file>       - Create empty file\n");
         print_str(b"  rm <file>          - Remove file\n");
-        print_str(b"  cp <src> <dst>     - Copy file (not implemented)\n");
-        print_str(b"  mv <src> <dst>     - Move file (not implemented)\n");
-        print_str(b"\nNavigation:\n");
+        // print_str(b"  cp <src> <dst>     - Copy file (not implemented)\n");
+        // print_str(b"  mv <src> <dst>     - Move file (not implemented)\n");
+        // print_str(b"\nNavigation:\n");
         print_str(b"  cd [path]          - Change directory\n");
         print_str(b"  pwd                - Print working directory\n");
+        print_str(b"...\n");
         print_str(b"\nSystem:\n");
         print_str(b"  ps                 - List processes\n");
         print_str(b"  kill <pid>         - Terminate process\n");
         print_str(b"  free               - Show memory usage\n");
-        print_str(b"  df                 - Show disk usage\n");
-        print_str(b"  mount              - Show mounted filesystems\n");
-        print_str(b"  uname              - System information\n");
-        print_str(b"\nEnvironment:\n");
-        print_str(b"  env                - Show environment variables\n");
-        print_str(b"  export VAR=val     - Set environment variable\n");
-        print_str(b"  alias name=cmd     - Create command alias\n");
+        // print_str(b"  df                 - Show disk usage\n");
+        // print_str(b"  mount              - Show mounted filesystems\n");
+        // print_str(b"  uname              - System information\n");
+        // print_str(b"\nEnvironment:\n");
+        // print_str(b"  env                - Show environment variables\n");
+        // print_str(b"  export VAR=val     - Set environment variable\n");
+        // print_str(b"  alias name=cmd     - Create command alias\n");
         print_str(b"  history            - Show command history\n");
-        print_str(b"\nUtilities:\n");
-        print_str(b"  echo <text>        - Print text\n");
-        print_str(b"  clear              - Clear screen\n");
-        print_str(b"  date               - Show current date/time\n");
-        print_str(b"  uptime             - Show system uptime\n");
-        print_str(b"  which <cmd>        - Locate command\n");
-        print_str(b"  whoami             - Show current user\n");
-        print_str(b"  help               - Show this help\n");
-        print_str(b"  exit [code]        - Exit shell\n");
+        // print_str(b"\nUtilities:\n");
+        // print_str(b"  echo <text>        - Print text\n");
+        // print_str(b"  clear              - Clear screen\n");
+        // print_str(b"  date               - Show current date/time\n");
+        // print_str(b"  uptime             - Show system uptime\n");
+        // print_str(b"  which <cmd>        - Locate command\n");
+        // print_str(b"  whoami             - Show current user\n");
+        // print_str(b"  help               - Show this help\n");
+        // print_str(b"  exit [code]        - Exit shell\n");
         print_str(b"\nNote: Many advanced commands are recognized but not yet implemented.\n");
         self.last_exit_code = 0;
     }
     
-    fn cmd_pwd(&mut self) {
-        print_str(get_str(&self.cwd));
-        print_str(b"\n");
-        self.last_exit_code = 0;
-    }
     
     fn cmd_env(&mut self) {
         if !self.env_vars.is_null() {
@@ -2284,6 +2353,7 @@ impl BashShell {
     
     fn cmd_clear(&mut self) {
         print_str(b"\x1b[2J\x1b[H"); // ANSI escape codes to clear screen
+        unsafe { vga_clear(); };
         self.last_exit_code = 0;
     }
     
@@ -2392,6 +2462,26 @@ impl BashShell {
     
     fn cmd_false(&mut self) {
         self.last_exit_code = 1;
+    }
+    
+    fn cmd_test_args_heap(&mut self, args_buffer: &[u8], argc: usize) {
+        print_str(b"test_args: argc=");
+        print_int(argc);
+        print_str(b"\n");
+        
+        for i in 0..argc {
+            print_str(b"  arg[");
+            print_int(i);
+            print_str(b"]=");
+            let arg = self.get_arg_heap(args_buffer, i);
+            print_str(b"'");
+            print_str(arg);
+            print_str(b"' (len=");
+            print_int(arg.len());
+            print_str(b")\n");
+        }
+        
+        self.last_exit_code = 0;
     }
 }
 

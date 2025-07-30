@@ -328,11 +328,11 @@ void kernel_main(uint64_t mb2_info_ptr) {
     rust_vga_print("\n");
 
     // Minimal heap allocation and write test
-    void* test_ptr = rust_kmalloc(64);
-    if (test_ptr) {
-        ((char*)test_ptr)[0] = 0x42;
-        serial_write("[C-DEBUG] kmalloc write OK\n");
-    } else {
-        serial_write("[C-DEBUG] kmalloc failed\n");
-    }
+    // void* test_ptr = rust_kmalloc(64);
+    // if (test_ptr) {
+    //     ((char*)test_ptr)[0] = 0x42;
+    //     serial_write("[C-DEBUG] kmalloc write OK\n");
+    // } else {
+    //     serial_write("[C-DEBUG] kmalloc failed\n");
+    // }
 }

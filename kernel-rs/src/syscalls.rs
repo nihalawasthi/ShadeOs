@@ -4,7 +4,12 @@ use alloc::vec::Vec;
 
 #[no_mangle]
 pub extern "C" fn rust_syscall_init() {
-    // TODO: Implement syscall init logic
+    // Initialize system calls
+    unsafe {
+        serial_write(b"[SYSCALL] Initializing system calls\n\0".as_ptr());
+    }
+    // Additional logic would be added here if needed for syscalls
+    // Add any initialization specific to syscall setup
 }
 
 extern "C" {

@@ -144,10 +144,40 @@ uint64_t paging_new_pml4() {
 }
 
 void paging_free_pml4(uint64_t pml4_phys) {
-    // For now, just free the PML4 page itself
-    free_page((void*)pml4_phys);
-    // TODO: Free all page tables recursively
-} 
+    if (!pml4_phys) return;
+    
+    uint64_t* pml4 = (uint64_t*)pml4_phys;
+    
+    // Free all page tables recursively
+    for (int pml4_idx = 0; pml4_idx < 256; pml4_idx++) { // Only user space (lower half)
+        if (!(pml4[pml4_idx] & PAGE_PRESENT)) continue;
+        
+        uint64_t* pdpt = get_table(pml4[pml4_idx] & ~0xFFFULL);
+        if (!pdpt) continue;
+        
+        for (int pdpt_idx = 0; pdpt_idx < PDE_ENTRIES; pdpt_idx++) {
+            if (!(pdpt[pdpt_idx] & PAGE_PRESENT)) continue;
+            
+            uint64_t* pd = get_table(pdpt[pdpt_idx] & ~0xFFFULL);
+            if (!pd) continue;
+            
+            for (int pd_idx = 0; pd_idx < PDE_ENTRIES; pd_idx++) {
+                if (!(pd[pd_idx] & PAGE_PRESENT)) continue;
+                
+                uint64_t* pt = get_table(pd[pd_idx] & ~0xFFFULL);
+                if (pt) {
+                    free_page(pt); // Free page table
+                }
+            }
+            
+            free_page(pd); // Free page directory
+        }
+        
+        free_page(pdpt); // Free page directory pointer table
+    }
+    
+    free_page((void*)pml4_phys); // Free PML4 itself
+}
 
 // FFI wrappers for Rust
 uint64_t rust_paging_new_pml4() {

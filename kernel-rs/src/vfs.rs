@@ -11,6 +11,8 @@ use core::option::Option::{Some, None};
 extern "C" {
     fn serial_write(s: *const u8);
     fn vga_print(s: *const u8);
+    fn sys_cli(); // Disable interrupts
+    fn sys_sti(); // Enable interrupts
 }
 
 #[derive(Clone)]
@@ -261,6 +263,9 @@ pub fn list_directory(path: *const u8) -> i32 {
     if let Some(entry) = find_entry(path) {
         match entry.file_type {
             FileType::Directory => {
+                // Enter critical section to prevent concurrent screen access
+                unsafe { sys_cli(); }
+                
                 for (name, child) in &entry.children {
                     let type_char = match child.file_type {
                         FileType::Directory => b'd',
@@ -306,6 +311,9 @@ pub fn list_directory(path: *const u8) -> i32 {
                         vga_print(b"\n".as_ptr());
                     }
                 }
+                
+                // Exit critical section
+                unsafe { sys_sti(); }
                 0
             },
             FileType::Regular => -20, // Not a directory
@@ -352,12 +360,60 @@ pub extern "C" fn rust_vfs_ls(path: *const u8) -> i32 {
 }
 
 #[no_mangle]
-pub extern "C" fn rust_vfs_stat(_path: *const u8, _statbuf: *mut u8) -> i32 {
-    // TODO: Implement stat logic
-    -1
+pub extern "C" fn rust_vfs_stat(path: *const u8, statbuf: *mut u8) -> i32 {
+    if path.is_null() || statbuf.is_null() {
+        return -22; // EINVAL
+    }
+    
+    if let Some(entry) = find_entry(path) {
+        unsafe {
+            // Fill basic stat structure (simplified)
+            // struct stat has many fields, we'll fill the basic ones
+            let stat_ptr = statbuf as *mut u64;
+            
+            // st_dev (device ID)
+            *stat_ptr.add(0) = 1;
+            
+            // st_ino (inode number)
+            *stat_ptr.add(1) = path as u64; // Use path pointer as pseudo-inode
+            
+            // st_mode (file type and permissions)
+            let mode = match entry.file_type {
+                FileType::Directory => 0o040755, // Directory with 755 permissions
+                FileType::Regular => 0o100644,   // Regular file with 644 permissions
+            };
+            *stat_ptr.add(2) = mode;
+            
+            // st_nlink (number of hard links)
+            *stat_ptr.add(3) = 1;
+            
+            // st_uid, st_gid (user and group IDs)
+            *stat_ptr.add(4) = 0; // root
+            *stat_ptr.add(5) = 0; // root
+            
+            // st_size (file size)
+            *stat_ptr.add(6) = entry.data.len() as u64;
+            
+            // st_atime, st_mtime, st_ctime (access, modify, change times)
+            let current_time = 1640995200; // Jan 1, 2022 as dummy time
+            *stat_ptr.add(7) = current_time;
+            *stat_ptr.add(8) = current_time;
+            *stat_ptr.add(9) = current_time;
+        }
+        0
+    } else {
+        -2 // ENOENT - No such file or directory
+    }
 }
 
 #[no_mangle]
-pub extern "C" fn rust_vfs_get_root() {
-    // TODO: Implement get_root logic
+pub extern "C" fn rust_vfs_get_root() -> *mut u8 {
+    unsafe {
+        if let Some(ref mut root) = ROOT_FS {
+            // Return pointer to root filesystem entry
+            root as *mut FileEntry as *mut u8
+        } else {
+            core::ptr::null_mut()
+        }
+    }
 }

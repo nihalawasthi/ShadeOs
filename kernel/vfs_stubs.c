@@ -15,6 +15,7 @@ extern int rust_vfs_read(const char* path, void* buf, int max_len);
 extern uint64_t rust_vfs_write(const char* path, const void* buf, uint64_t len);
 extern void* rust_vfs_get_root();
 extern int rust_elf_load(const char* path);
+extern void* rust_kmalloc(size_t size);
 
 static int rust_vfs_ready = 0;
 
@@ -124,7 +125,31 @@ vfs_node_t* vfs_find(const char* path, vfs_node_t* cwd) {
         return NULL;
     }
     
-    // TODO: Implement safe path resolution
+    // Implement safe path resolution through Rust VFS
+    // For now, we'll return a fallback node for existing files
+    // In a full implementation, this would traverse the directory tree
+    
+    // Try to read the file to see if it exists
+    char test_buf[1];
+    int result = rust_vfs_read(path, test_buf, 1);
+    
+    if (result >= 0) {
+        // File exists, create a temporary node representation
+        vfs_node_t* temp_node = (vfs_node_t*)rust_kmalloc(sizeof(vfs_node_t));
+        if (!temp_node) return NULL; // Handle memory allocation failure
+        *temp_node = (vfs_node_t){
+            .used = 1,
+            .node_type = VFS_TYPE_FILE,
+            .name = "temp",
+            .size = 0,
+            .parent = NULL,
+            .child = NULL,
+            .sibling = NULL
+        };
+        temp_node->size = result;
+        return temp_node;
+    }
+    
     return NULL;
 }
 
@@ -141,8 +166,38 @@ vfs_node_t* vfs_create(const char* name, int type, vfs_node_t* parent) {
         return NULL;
     }
     
-    // TODO: Implement safe node creation
-    return NULL;
+    if (parent == NULL || !parent->used || parent->node_type != VFS_TYPE_DIR) {
+        vga_print("[VFS] Invalid parent in vfs_create\n");
+        return NULL;
+    }
+
+    // Call Rust VFS to create a new file or directory
+    int result;
+    if (type == VFS_TYPE_DIR) {
+        result = rust_vfs_mkdir(name);
+    } else if (type == VFS_TYPE_FILE) {
+        result = rust_vfs_create_file(name);
+    } else {
+        vga_print("[VFS] Unknown type in vfs_create\n");
+        return NULL;
+    }
+
+    if (result != 0) {
+        vga_print("[VFS] Failed to create node\n");
+        return NULL;
+    }
+
+    // Assume success and return a simple node reference
+    static vfs_node_t temp_node;
+    temp_node.used = 1;
+    temp_node.node_type = type;
+    safe_strncpy(temp_node.name, name, sizeof(temp_node.name));
+    temp_node.size = 0;
+    temp_node.parent = parent;
+    temp_node.child = NULL;
+    temp_node.sibling = NULL;
+
+    return &temp_node;
 }
 
 int vfs_write(vfs_node_t* node, const void* buf, int size) {
@@ -166,8 +221,18 @@ int vfs_write(vfs_node_t* node, const void* buf, int size) {
         return -1;
     }
     
-    // TODO: Implement safe write
-    return -1;
+    // Convert node to path (simplified, real implementation would be more complex)
+    const char* path = node->name;
+
+    // Use Rust VFS to write to a file
+    uint64_t result = rust_vfs_write(path, buf, size);
+
+    if (result > 0) {
+        return (int)result;
+    } else {
+        vga_print("[VFS] Write failed\n");
+        return -1;
+    }
 }
 
 int vfs_read(vfs_node_t* node, void* buf, int size) {
@@ -191,8 +256,18 @@ int vfs_read(vfs_node_t* node, void* buf, int size) {
         return -1;
     }
     
-    // TODO: Implement safe read
-    return -1;
+    // Convert node to path (simplified, real implementation would be more complex)
+    const char* path = node->name;
+
+    // Use Rust VFS to read from a file
+    int result = rust_vfs_read(path, buf, size);
+
+    if (result >= 0) {
+        return result;
+    } else {
+        vga_print("[VFS] Read failed\n");
+        return -1;
+    }
 }
 
 void vfs_list(vfs_node_t* dir) {
@@ -206,7 +281,13 @@ void vfs_list(vfs_node_t* dir) {
         return;
     }
     
-    // TODO: Implement safe directory listing
+    if (dir->node_type != VFS_TYPE_DIR) {
+        vga_print("[VFS] Node is not a directory\n");
+        return;
+    }
+
+    // Call Rust VFS to list directory contents
+    rust_vfs_ls(dir->name);
 }
 
 int elf_load(const char* path) {

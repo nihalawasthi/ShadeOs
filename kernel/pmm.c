@@ -89,16 +89,37 @@ void pmm_init(uint64_t mb2_info_ptr) {
     extern uint8_t _kernel_start, _kernel_end;
     uint64_t kernel_start = (uint64_t)&_kernel_start;
     uint64_t kernel_end = (uint64_t)&_kernel_end;
-    uint64_t bitmap_start = (uint64_t)page_bitmap;
-    uint64_t bitmap_end = bitmap_start + sizeof(page_bitmap);
-    for (uint64_t addr = kernel_start; addr < kernel_end; addr += PAGE_SIZE) {
-        uint64_t page_idx = (addr - base_addr) / PAGE_SIZE;
-        if (page_idx < MAX_PAGES && is_page_free(page_idx)) {
-            set_page_used(page_idx);
-            free_pages--;
+    
+    // Reserve kernel memory pages more aggressively
+    // Reserve from kernel start up to at least 4MB to include all kernel data
+    uint64_t kernel_end_safe = kernel_end + 0x100000; // Add 1MB buffer
+    if (kernel_end_safe < 0x400000) kernel_end_safe = 0x400000; // At least 4MB
+    
+    for (uint64_t addr = kernel_start; addr < kernel_end_safe; addr += PAGE_SIZE) {
+        if (addr >= base_addr) {
+            uint64_t page_idx = (addr - base_addr) / PAGE_SIZE;
+            if (page_idx < MAX_PAGES && is_page_free(page_idx)) {
+                set_page_used(page_idx);
+                free_pages--;
+            }
         }
     }
-    for (uint64_t addr = bitmap_start; addr < bitmap_end; addr += PAGE_SIZE) {
+    
+    // Also reserve the bitmap itself if it's in managed memory range
+    uint64_t bitmap_start = (uint64_t)page_bitmap;
+    uint64_t bitmap_end = bitmap_start + sizeof(page_bitmap);
+    if (bitmap_start >= base_addr) {
+        for (uint64_t addr = bitmap_start; addr < bitmap_end; addr += PAGE_SIZE) {
+            uint64_t page_idx = (addr - base_addr) / PAGE_SIZE;
+            if (page_idx < MAX_PAGES && is_page_free(page_idx)) {
+                set_page_used(page_idx);
+                free_pages--;
+            }
+        }
+    }
+    
+    // Reserve the first 16MB for critical kernel structures
+    for (uint64_t addr = base_addr; addr < base_addr + 0x1000000 && addr < kernel_end_safe; addr += PAGE_SIZE) {
         uint64_t page_idx = (addr - base_addr) / PAGE_SIZE;
         if (page_idx < MAX_PAGES && is_page_free(page_idx)) {
             set_page_used(page_idx);
