@@ -31,8 +31,6 @@ You will need the following tools to build and run ShadeOS:
 *   `qemu`
 *   A Rust toolchain (`rustc`, `cargo`) with the appropriate target.
 
-*(You might want to add more specific details about setting up the cross-compiler and Rust target here.)*
-
 ### Building from Source
 
 1.  **Clone the repository:**
@@ -42,25 +40,39 @@ You will need the following tools to build and run ShadeOS:
     ```
 
 2.  **Build the project:**
+
+    You have two alternative methods to build ShadeOS:
+
+    **A) Convenience Script (for Arch Linux)**
+
+    For users on an Arch-based distribution, a convenience script is provided. It will automatically install all required dependencies and then build the project.
+    ```sh
+    ./install.sh
+    ```
+
+    **B) Manual Build (All Systems)**
+
+    On any other system, ensure you have all the [Prerequisites](#prerequisites) installed first. Then, run the following command to build the project:
     ```sh
     make all
     ```
-    This will compile the C and Rust code and create a bootable ISO image in the `bin/` directory.
+    Both methods will compile the C and Rust code and create a bootable `ShadeOS.iso` image in the `bin/` directory.
 
-### Running with QEMU
+### Running the OS
 
-To run ShadeOS in an emulator after building it:
-```sh
-make run
-```
-This will launch QEMU with the generated ISO file.
+After a successful build, you can run ShadeOS in an emulator or a virtual machine.
+
+*   **Using the QEMU Script:** The easiest way to test the OS is with the provided script, which launches QEMU with the correct settings:
+    ```sh
+    ./run.sh
+    ```
+*   **Using another Virtual Machine:** Alternatively, you can take the generated `bin/ShadeOS.iso` file and boot it in any standard virtual machine software like VMware or VirtualBox.
 
 ## 💿 Downloads
 
 You can download the latest pre-built bootable ISO image from the **GitHub Releases page**.
 
-**Latest Release:** ShadeOS v0.0.1
-*(Note: This link is a placeholder. See the guide below on how to create releases and get a real link.)*
+**Download Latest Release**
 
 ## 🤝 Contributing
 
