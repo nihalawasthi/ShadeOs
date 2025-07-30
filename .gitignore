@@ -2,7 +2,6 @@
 *.o
 *.obj
 *.bin
-*.iso
 *.elf
 *.img
 *.map
