@@ -2,9 +2,14 @@
 
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/nihalawasthi/ShadeOs)](https://github.com/nihalawasthi/ShadeOs/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-<!-- Add other badges like build status once you have CI/CD setup -->
+![Github Views](https://visitor-badge.laobi.icu/badge?page_id=nihalawasthi.ShadeOs)
+![GitHub contributors](https://img.shields.io/github/contributors/nihalawasthi/ShadeOs)
+![GitHub issues](https://img.shields.io/github/issues/nihalawasthi/ShadeOs)
 
-A hobby operating system kernel built from scratch, exploring low-level system development with a hybrid C and Rust approach.
+<!--![GitHub forks](https://img.shields.io/github/forks/nihalawasthi/ShadeOs)
+![GitHub stars](https://img.shields.io/github/stars/nihalawasthi/ShadeOs) -->
+
+A operating system kernel built from scratch, exploring low-level system development with a hybrid C and Rust approach.
 
 ## 🌟 Features
 
@@ -54,7 +59,7 @@ You will need the following tools to build and run ShadeOS:
 
     On any other system, ensure you have all the [Prerequisites](#prerequisites) installed first. Then, run the following command to build the project:
     ```sh
-    make all
+    make
     ```
     Both methods will compile the C and Rust code and create a bootable `ShadeOS.iso` image in the `bin/` directory.
 
@@ -72,11 +77,22 @@ After a successful build, you can run ShadeOS in an emulator or a virtual machin
 
 You can download the latest pre-built bootable ISO image from the **GitHub Releases page**.
 
-**Download Latest Release**
+[**Download Latest Release**](https://github.com/nihalawasthi/ShadeOs/releases/tag/v0.0.1)
 
 ## 🤝 Contributing
 
 Contributions are welcome! If you'd like to help improve ShadeOS, please feel free to fork the repository, make your changes, and submit a pull request. For major changes, please open an issue first to discuss what you would like to change.
+
+## 🛡️ Security & Bug Reporting
+
+If you discover a bug or security vulnerability, please open an issue or email me directly at `nihalawasthi498@gmail.com`. Pull requests are also welcome for fixes!
+
+## ✨ Contributors
+
+<br>
+<a href="https://github.com/nihalawasthi/ShadeOs/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=nihalawasthi/ShadeOs" />
+</a>
 
 ## 📜 License
 
