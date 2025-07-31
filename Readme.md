@@ -79,20 +79,18 @@ You can download the latest pre-built bootable ISO image from the **GitHub Relea
 
 [**Download Latest Release**](https://github.com/nihalawasthi/ShadeOs/releases/tag/v0.0.1)
 
-## 🤝 Contributing
-
-Contributions are welcome! If you'd like to help improve ShadeOS, please feel free to fork the repository, make your changes, and submit a pull request. For major changes, please open an issue first to discuss what you would like to change.
-
 ## 🛡️ Security & Bug Reporting
 
 If you discover a bug or security vulnerability, please open an issue or email me directly at `nihalawasthi498@gmail.com`. Pull requests are also welcome for fixes!
 
 ## ✨ Contributors
 
-<br>
 <a href="https://github.com/nihalawasthi/ShadeOs/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=nihalawasthi/ShadeOs" />
-</a>
+</a><br>
+
+---
+Contributions are welcome! If you'd like to help improve ShadeOS, please feel free to fork the repository, make your changes, and submit a pull request. For major changes, please open an issue first to discuss what you would like to change.
 
 ## 📜 License
 
