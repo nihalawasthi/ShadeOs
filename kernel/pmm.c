@@ -82,7 +82,6 @@ void pmm_init(uint64_t mb2_info_ptr) {
         tag = (mb2_tag_t*)(((uintptr_t)((uint8_t*)tag + tag->size + MULTIBOOT2_TAG_ALIGN - 1)) & ~(uintptr_t)(MULTIBOOT2_TAG_ALIGN - 1));
     }
     if (!mmap_found) {
-        vga_print("[PMM] ERROR: No MMAP tag found!\n");
         serial_write("[PMM] ERROR: No MMAP tag found!\n");
     }
     // Mark kernel and bitmap as used

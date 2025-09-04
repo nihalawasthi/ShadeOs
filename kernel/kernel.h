@@ -1,6 +1,7 @@
 #ifndef KERNEL_H
 #define KERNEL_H
 
+#include <stdbool.h>
 #include "vfs.h"
 // Standard integer types
 typedef unsigned char uint8_t;
@@ -84,6 +85,9 @@ extern "C" {
 extern void rust_vga_print(const char* s);
 extern void rust_vga_set_color(unsigned char color);
 extern void rust_vga_clear();
+extern void rust_vga_enable_auto_clear();
+extern void rust_vga_disable_auto_clear();
+extern bool rust_vga_is_auto_clear_enabled();
 #ifdef __cplusplus
 }
 #endif

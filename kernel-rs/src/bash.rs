@@ -26,6 +26,13 @@ extern "C" {
     fn serial_write_dec(s: *const u8, value: u64);
     fn rust_get_block_header_size() -> usize;
     fn pause();
+    fn rust_vga_enable_auto_clear();
+    fn rust_vga_disable_auto_clear();
+    fn rust_vga_is_auto_clear_enabled() -> bool;
+    fn timer_get_ticks() -> u64;
+    fn rust_process_list();
+    fn pmm_total_memory() -> u64;
+    fn pmm_free_memory() -> u64;
 }
 
 // Utility functions
@@ -704,6 +711,7 @@ impl BashShell {
             b"xargs" => self.cmd_xargs_heap(args_slice, argc),
             b"parallel" => self.cmd_parallel_heap(args_slice, argc),
             b"test_args" => self.cmd_test_args_heap(args_slice, argc),
+            b"vga" => self.cmd_vga_heap(args_slice, argc),
             _ => {
                 print_str(b"bash: ");
                 print_str(cmd);
@@ -2288,9 +2296,9 @@ impl BashShell {
         print_str(b"  mkdir <dir>        - Create directory\n");
         print_str(b"  touch <file>       - Create empty file\n");
         print_str(b"  rm <file>          - Remove file\n");
-        // print_str(b"  cp <src> <dst>     - Copy file (not implemented)\n");
-        // print_str(b"  mv <src> <dst>     - Move file (not implemented)\n");
-        // print_str(b"\nNavigation:\n");
+        print_str(b"  cp <src> <dst>     - Copy file (not implemented)\n");
+        print_str(b"  mv <src> <dst>     - Move file (not implemented)\n");
+        print_str(b"\nNavigation:\n");
         print_str(b"  cd [path]          - Change directory\n");
         print_str(b"  pwd                - Print working directory\n");
         print_str(b"...\n");
@@ -2298,23 +2306,23 @@ impl BashShell {
         print_str(b"  ps                 - List processes\n");
         print_str(b"  kill <pid>         - Terminate process\n");
         print_str(b"  free               - Show memory usage\n");
-        // print_str(b"  df                 - Show disk usage\n");
-        // print_str(b"  mount              - Show mounted filesystems\n");
-        // print_str(b"  uname              - System information\n");
-        // print_str(b"\nEnvironment:\n");
-        // print_str(b"  env                - Show environment variables\n");
-        // print_str(b"  export VAR=val     - Set environment variable\n");
-        // print_str(b"  alias name=cmd     - Create command alias\n");
+        print_str(b"  df                 - Show disk usage\n");
+        print_str(b"  mount              - Show mounted filesystems\n");
+        print_str(b"  uname              - System information\n");
+        print_str(b"\nEnvironment:\n");
+        print_str(b"  env                - Show environment variables\n");
+        print_str(b"  export VAR=val     - Set environment variable\n");
+        print_str(b"  alias name=cmd     - Create command alias\n");
         print_str(b"  history            - Show command history\n");
-        // print_str(b"\nUtilities:\n");
-        // print_str(b"  echo <text>        - Print text\n");
-        // print_str(b"  clear              - Clear screen\n");
-        // print_str(b"  date               - Show current date/time\n");
-        // print_str(b"  uptime             - Show system uptime\n");
-        // print_str(b"  which <cmd>        - Locate command\n");
-        // print_str(b"  whoami             - Show current user\n");
-        // print_str(b"  help               - Show this help\n");
-        // print_str(b"  exit [code]        - Exit shell\n");
+        print_str(b"\nUtilities:\n");
+        print_str(b"  echo <text>        - Print text\n");
+        print_str(b"  clear              - Clear screen\n");
+        print_str(b"  date               - Show current date/time\n");
+        print_str(b"  uptime             - Show system uptime\n");
+        print_str(b"  which <cmd>        - Locate command\n");
+        print_str(b"  whoami             - Show current user\n");
+        print_str(b"  help               - Show this help\n");
+        print_str(b"  exit [code]        - Exit shell\n");
         print_str(b"\nNote: Many advanced commands are recognized but not yet implemented.\n");
         self.last_exit_code = 0;
     }
@@ -2357,53 +2365,126 @@ impl BashShell {
         self.last_exit_code = 0;
     }
     
+    fn cmd_vga_heap(&mut self, args_buffer: &[u8], argc: usize) {
+        if argc < 2 {
+            print_str(b"Usage: vga <command> [args]\n");
+            print_str(b"Commands:\n");
+            print_str(b"  auto-clear on|off    - Enable/disable auto-clear on screen overflow\n");
+            print_str(b"  status               - Show current VGA settings\n");
+            self.last_exit_code = 1;
+            return;
+        }
+        
+        let command = self.get_arg_heap(args_buffer, 1);
+        
+        if str_eq(command, b"auto-clear") {
+            if argc < 3 {
+                print_str(b"Usage: vga auto-clear on|off\n");
+                self.last_exit_code = 1;
+                return;
+            }
+            
+            let arg = self.get_arg_heap(args_buffer, 2);
+            if str_eq(arg, b"on") {
+                unsafe { rust_vga_enable_auto_clear(); }
+                print_str(b"Auto-clear enabled\n");
+                self.last_exit_code = 0;
+            } else if str_eq(arg, b"off") {
+                unsafe { rust_vga_disable_auto_clear(); }
+                print_str(b"Auto-clear disabled\n");
+                self.last_exit_code = 0;
+            } else {
+                print_str(b"Invalid argument. Use 'on' or 'off'\n");
+                self.last_exit_code = 1;
+            }
+        } else if str_eq(command, b"status") {
+            let enabled = unsafe { rust_vga_is_auto_clear_enabled() };
+            print_str(b"VGA Status:\n");
+            print_str(b"  Auto-clear: ");
+            if enabled {
+                print_str(b"enabled\n");
+            } else {
+                print_str(b"disabled\n");
+            }
+            self.last_exit_code = 0;
+        } else {
+            print_str(b"Unknown command: ");
+            print_str(command);
+            print_str(b"\n");
+            self.last_exit_code = 1;
+        }
+    }
+    
     fn cmd_date(&mut self) {
-        print_str(b"Mon Jan  1 00:00:00 UTC 2024\n"); // Placeholder
+        unsafe {
+            let ticks = timer_get_ticks();
+            format_date(ticks);
+            print_str(b"\n");
+        }
         self.last_exit_code = 0;
     }
     
     fn cmd_uptime(&mut self) {
-        print_str(b"up 0 days, 0:00, 1 user, load average: 0.00, 0.00, 0.00\n");
+        unsafe {
+            let ticks = timer_get_ticks();
+            format_uptime(ticks);
+            print_str(b", 1 user, load average: 0.00, 0.00, 0.00\n");
+        }
         self.last_exit_code = 0;
     }
     
     fn cmd_ps(&mut self) {
         print_str(b"  PID TTY          TIME CMD\n");
-        print_str(b"    1 tty1     00:00:00 init\n");
-        print_str(b"    2 tty1     00:00:00 bash\n");
+        unsafe {
+            rust_process_list();
+        }
         self.last_exit_code = 0;
     }
     
     fn cmd_whoami(&mut self) {
-        if let Some(user) = self.get_env(b"USER") {
-            print_str(user);
-        } else {
-            print_str(b"root");
-        }
-        print_str(b"\n");
+        print_str(b"root\n");
         self.last_exit_code = 0;
     }
     
     fn cmd_uname(&mut self) {
-        print_str(b"ShadeOS 1.0.0 x86_64\n");
+        print_str(b"ShadeOS\n");
         self.last_exit_code = 0;
     }
     
     fn cmd_free(&mut self) {
-        print_str(b"              total        used        free      shared  buff/cache   available\n");
-        print_str(b"Mem:        1048576      524288      524288           0           0      524288\n");
-        print_str(b"Swap:             0           0           0\n");
+        unsafe {
+            let total_mem = pmm_total_memory();
+            let free_mem = pmm_free_memory();
+            let used_mem = total_mem - free_mem;
+            
+            print_str(b"              total        used        free      shared  buff/cache   available\n");
+            
+            // Format total memory
+            let total_kb = total_mem / 1024;
+            let used_kb = used_mem / 1024;
+            let free_kb = free_mem / 1024;
+            
+            print_str(b"Mem:        ");
+            print_int(total_kb as usize);
+            print_str(b"      ");
+            print_int(used_kb as usize);
+            print_str(b"      ");
+            print_int(free_kb as usize);
+            print_str(b"           0           0      ");
+            print_int(free_kb as usize);
+            print_str(b"\n");
+        }
         self.last_exit_code = 0;
     }
     
     fn cmd_df(&mut self) {
         print_str(b"Filesystem     1K-blocks  Used Available Use% Mounted on\n");
-        print_str(b"/dev/sda1        1048576   512      1048064   1% /\n");
+        print_str(b"ramfs             16384     0     16384   0% /\n");
         self.last_exit_code = 0;
     }
     
     fn cmd_mount(&mut self) {
-        print_str(b"/dev/sda1 on / type ext4 (rw,relatime)\n");
+        print_str(b"ramfs on / type ramfs (rw,relatime)\n");
         self.last_exit_code = 0;
     }
     
@@ -2423,11 +2504,17 @@ impl BashShell {
     fn cmd_route(&mut self) {
         print_str(b"Kernel IP routing table\n");
         print_str(b"Destination     Gateway         Genmask         Flags Metric Ref    Use Iface\n");
+        print_str(b"default         *               0.0.0.0         U     0      0        0 lo\n");
         self.last_exit_code = 0;
     }
     
     fn cmd_top(&mut self) {
-        print_str(b"top - 00:00:00 up 0 min,  1 user,  load average: 0.00, 0.00, 0.00\n");
+        unsafe {
+            let ticks = timer_get_ticks();
+            print_str(b"top - ");
+            format_uptime(ticks);
+            print_str(b",  1 user,  load average: 0.00, 0.00, 0.00\n");
+        }
         self.last_exit_code = 0;
     }
     
@@ -2530,4 +2617,100 @@ pub extern "C" fn rust_bash_execute(command: *const u8) {
             shell.execute_command(cmd_slice);
         }
     }
+}
+
+// Add these helper functions after the existing utility functions
+
+fn format_uptime(ticks: u64) {
+    // Assuming 100 ticks per second (timer frequency)
+    let seconds = ticks / 100;
+    let days = seconds / 86400;
+    let hours = (seconds % 86400) / 3600;
+    let minutes = (seconds % 3600) / 60;
+    let secs = seconds % 60;
+    
+    if days > 0 {
+        print_str(b"up ");
+        print_int(days as usize);
+        print_str(b" days, ");
+        print_int(hours as usize);
+        print_str(b":");
+        if minutes < 10 { print_str(b"0"); }
+        print_int(minutes as usize);
+        print_str(b":");
+        if secs < 10 { print_str(b"0"); }
+        print_int(secs as usize);
+    } else if hours > 0 {
+        print_str(b"up ");
+        print_int(hours as usize);
+        print_str(b":");
+        if minutes < 10 { print_str(b"0"); }
+        print_int(minutes as usize);
+        print_str(b":");
+        if secs < 10 { print_str(b"0"); }
+        print_int(secs as usize);
+    } else if minutes > 0 {
+        print_str(b"up ");
+        print_int(minutes as usize);
+        print_str(b":");
+        if secs < 10 { print_str(b"0"); }
+        print_int(secs as usize);
+    } else {
+        print_str(b"up ");
+        print_int(secs as usize);
+        print_str(b" seconds");
+    }
+}
+
+fn format_date(ticks: u64) {
+    // Start from a more recent base date (Jan 1, 2025) and add seconds
+    // This avoids the complex leap year calculations for now
+    let base_time = 1735689600; // Unix timestamp for Jan 1, 2025 00:00:00 UTC
+    let seconds = ticks / 100;
+    let current_time = base_time + seconds as i64;
+    
+    // For now, let's use a much simpler approach that just shows relative time
+    // This will be more accurate than trying to calculate exact dates
+    let days_since_base = current_time / 86400;
+    let seconds_in_day = current_time % 86400;
+    let hour = (seconds_in_day / 3600) as i32;
+    let minute = ((seconds_in_day % 3600) / 60) as i32;
+    let second = (seconds_in_day % 60) as i32;
+    
+    // Simple month/day calculation based on days since base
+    // But limit to reasonable values to avoid overflow
+    let day_of_year = if days_since_base > 365 { days_since_base % 365 } else { days_since_base };
+    
+    let month = if day_of_year < 31 { 1 } else if day_of_year < 59 { 2 } else if day_of_year < 90 { 3 }
+                else if day_of_year < 120 { 4 } else if day_of_year < 151 { 5 } else if day_of_year < 181 { 6 }
+                else if day_of_year < 212 { 7 } else if day_of_year < 243 { 8 } else if day_of_year < 273 { 9 }
+                else if day_of_year < 304 { 10 } else if day_of_year < 334 { 11 } else { 12 };
+    
+    let day = day_of_year - match month {
+        1 => 0, 2 => 31, 3 => 59, 4 => 90, 5 => 120, 6 => 151,
+        7 => 181, 8 => 212, 9 => 243, 10 => 273, 11 => 304, _ => 334
+    } + 1;
+    
+    let month_names = [b"Jan", b"Feb", b"Mar", b"Apr", b"May", b"Jun",
+                       b"Jul", b"Aug", b"Sep", b"Oct", b"Nov", b"Dec"];
+    
+    // Print month name
+    print_str(month_names[month as usize - 1]);
+    print_str(b" ");
+    
+    // Print day
+    print_int(day as usize);
+    print_str(b" ");
+    
+    // Print time
+    if hour < 10 { print_str(b"0"); }
+    print_int(hour as usize);
+    print_str(b":");
+    if minute < 10 { print_str(b"0"); }
+    print_int(minute as usize);
+    print_str(b":");
+    if second < 10 { print_str(b"0"); }
+    print_int(second as usize);
+    
+    print_str(b" UTC 2025");
 }

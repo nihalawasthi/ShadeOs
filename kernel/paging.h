@@ -12,6 +12,7 @@
 #define PAGE_DIRTY     0x40
 #define PAGE_HUGE      0x80
 #define PAGE_GLOBAL    0x100
+#define PAGE_DEVICE    0x10  // PAGE_PCD - Page Cache Disabled for memory-mapped I/O
 
 void paging_init();
 void map_page(uint64_t virt_addr, uint64_t phys_addr, uint64_t flags);

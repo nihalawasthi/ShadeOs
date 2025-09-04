@@ -25,13 +25,13 @@ typedef struct {
 } mb2_mmap_entry_t;
 
 void parse_multiboot2_memory_map(uint64_t mb2_info_ptr) {
-    vga_print("[BOOT] Parsing Multiboot2 memory map...\n");
+    serial_write("[BOOT] Parsing Multiboot2 memory map...\n");
     serial_write_hex("[MB2] mb2_info_ptr: ", mb2_info_ptr);
 
     serial_write("[DEBUG] parse_multiboot2_memory_map: start\n");
     // Check if pointer is valid and aligned
     if (mb2_info_ptr == 0 || (mb2_info_ptr & 0x7) != 0) {
-        vga_print("[BOOT] ERROR: Invalid or unaligned Multiboot2 info pointer!\n");
+        serial_write("[BOOT] ERROR: Invalid or unaligned Multiboot2 info pointer!\n");
         return;
     }
 
@@ -54,7 +54,7 @@ void parse_multiboot2_memory_map(uint64_t mb2_info_ptr) {
 
     // Validate total_size
     if (total_size < 8 || total_size > 0x1000000) {
-        vga_print("[BOOT] ERROR: Invalid total_size!\n");
+        serial_write("[BOOT] ERROR: Invalid total_size!\n");
         return;
     }
 
@@ -65,7 +65,7 @@ void parse_multiboot2_memory_map(uint64_t mb2_info_ptr) {
         tag_count++;
         if (tag->type == MULTIBOOT2_TAG_TYPE_MMAP) {
             mb2_tag_mmap_t* mmap_tag = (mb2_tag_mmap_t*)tag;
-            vga_print("[BOOT] Found memory map tag\n");
+            serial_write("[BOOT] Found memory map tag\n");
             uint8_t* mmap_end = (uint8_t*)mmap_tag + mmap_tag->size;
             for (uint8_t* entry_ptr = (uint8_t*)mmap_tag + sizeof(mb2_tag_mmap_t);
                  entry_ptr < mmap_end;

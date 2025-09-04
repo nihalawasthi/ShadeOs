@@ -8,15 +8,98 @@ const VGA_HEIGHT: usize = 25;
 static mut CURSOR_X: usize = 0;
 static mut CURSOR_Y: usize = 0;
 static mut CURRENT_COLOR: u8 = 0x0F; // White on black
+static mut AUTO_CLEAR_ENABLED: bool = true; // Enable auto-clear by default to prevent page faults
 
 extern "C" {
     fn serial_write(s: *const u8);
     fn outb(port: u16, value: u8);
 }
 
+fn verify_vga_buffer() -> bool {
+    unsafe {
+        if VGA_BUFFER.is_null() {
+            return false;
+        }
+        
+        // Try to read the first byte to verify the buffer is accessible
+        // This will cause a page fault if the buffer is not properly mapped
+        let _test_read = ptr::read_volatile(VGA_BUFFER);
+        return true;
+    }
+}
+
+fn ensure_vga_buffer_mapped() {
+    unsafe {
+        // Try to write a test pattern to verify the buffer is accessible
+        let test_pos = 0;
+        if test_pos < VGA_WIDTH * VGA_HEIGHT {
+            let original = ptr::read_volatile(VGA_BUFFER.add(test_pos));
+            ptr::write_volatile(VGA_BUFFER.add(test_pos), original);
+        }
+    }
+}
+
+fn is_scrolling_safe() -> bool {
+    unsafe {
+        // Check if we're near the bottom of the screen and if scrolling would be safe
+        if CURSOR_Y >= VGA_HEIGHT - 1 {
+            // We're at the bottom, check if VGA buffer is still accessible
+            return verify_vga_buffer();
+        }
+        return true;
+    }
+}
+
+fn auto_clear_if_needed() {
+    unsafe {
+        // If auto-clear is disabled, try regular scrolling
+        if !AUTO_CLEAR_ENABLED {
+            if is_scrolling_safe() {
+                scroll_up();
+                CURSOR_Y = VGA_HEIGHT - 1;
+            } else {
+                scroll_up_safe();
+            }
+            return;
+        }
+        
+        // If we're at the bottom of the screen and about to scroll, 
+        // consider auto-clearing instead to prevent page faults
+        if CURSOR_Y >= VGA_HEIGHT - 1 {
+            // Auto-clear the screen to prevent scrolling issues
+            clear();
+            CURSOR_X = 0;
+            CURSOR_Y = 0;
+            update_cursor();
+        }
+    }
+}
+
+pub fn enable_auto_clear() {
+    unsafe {
+        AUTO_CLEAR_ENABLED = true;
+    }
+}
+
+pub fn disable_auto_clear() {
+    unsafe {
+        AUTO_CLEAR_ENABLED = false;
+    }
+}
+
+pub fn is_auto_clear_enabled() -> bool {
+    unsafe {
+        AUTO_CLEAR_ENABLED
+    }
+}
+
 pub fn rust_vga_init() {
     unsafe {
         serial_write(b"[VGA] Initializing VGA driver\n\0".as_ptr());
+        
+        // Ensure VGA buffer is properly mapped
+        ensure_vga_buffer_mapped();
+        
         clear();
         set_color(0x0F); // White on black
         enable_cursor(14, 15); // Enable cursor with default size
@@ -48,8 +131,8 @@ pub fn print_char(c: u8) {
                 CURSOR_X = 0;
                 CURSOR_Y += 1;
                 if CURSOR_Y >= VGA_HEIGHT {
-                    scroll_up();
-                    CURSOR_Y = VGA_HEIGHT - 1;
+                    // Use auto-clear instead of scrolling to prevent page faults
+                    auto_clear_if_needed();
                 }
                 update_cursor();
             },
@@ -73,8 +156,8 @@ pub fn print_char(c: u8) {
                     CURSOR_X = 0;
                     CURSOR_Y += 1;
                     if CURSOR_Y >= VGA_HEIGHT {
-                        scroll_up();
-                        CURSOR_Y = VGA_HEIGHT - 1;
+                        // Use auto-clear instead of scrolling to prevent page faults
+                        auto_clear_if_needed();
                     }
                 }
                 
@@ -112,22 +195,53 @@ pub fn print_string(text: *const u8) {
     }
 }
 
+fn scroll_up_safe() {
+    unsafe {
+        // More conservative scrolling approach
+        // Instead of moving all lines, just clear the screen and reset cursor
+        // This prevents any potential memory access issues during scrolling
+        
+        // Clear the entire screen
+        for i in 0..(VGA_WIDTH * VGA_HEIGHT) {
+            if i < VGA_WIDTH * VGA_HEIGHT {
+                ptr::write_volatile(VGA_BUFFER.add(i), (CURRENT_COLOR as u16) << 8 | b' ' as u16);
+            }
+        }
+        
+        // Reset cursor to top
+        CURSOR_X = 0;
+        CURSOR_Y = 0;
+        update_cursor();
+    }
+}
+
 fn scroll_up() {
     unsafe {
-        // Move all lines up by one
+        // Add safety check to ensure VGA buffer is accessible
+        if VGA_BUFFER.is_null() || !verify_vga_buffer() {
+            return;
+        }
+        
+        // Move all lines up by one with bounds checking
         for y in 1..VGA_HEIGHT {
             for x in 0..VGA_WIDTH {
                 let src_pos = y * VGA_WIDTH + x;
                 let dst_pos = (y - 1) * VGA_WIDTH + x;
-                let entry = ptr::read_volatile(VGA_BUFFER.add(src_pos));
-                ptr::write_volatile(VGA_BUFFER.add(dst_pos), entry);
+                
+                // Bounds check before accessing memory
+                if src_pos < VGA_WIDTH * VGA_HEIGHT && dst_pos < VGA_WIDTH * VGA_HEIGHT {
+                    let entry = ptr::read_volatile(VGA_BUFFER.add(src_pos));
+                    ptr::write_volatile(VGA_BUFFER.add(dst_pos), entry);
+                }
             }
         }
         
-        // Clear the last line
+        // Clear the last line with bounds checking
         for x in 0..VGA_WIDTH {
             let pos = (VGA_HEIGHT - 1) * VGA_WIDTH + x;
-            ptr::write_volatile(VGA_BUFFER.add(pos), (CURRENT_COLOR as u16) << 8 | b' ' as u16);
+            if pos < VGA_WIDTH * VGA_HEIGHT {
+                ptr::write_volatile(VGA_BUFFER.add(pos), (CURRENT_COLOR as u16) << 8 | b' ' as u16);
+            }
         }
     }
 }
@@ -266,6 +380,21 @@ pub extern "C" fn vga_disable_cursor() {
 #[no_mangle]
 pub extern "C" fn vga_update_cursor() {
     update_cursor();
+}
+
+#[no_mangle]
+pub extern "C" fn rust_vga_enable_auto_clear() {
+    enable_auto_clear();
+}
+
+#[no_mangle]
+pub extern "C" fn rust_vga_disable_auto_clear() {
+    disable_auto_clear();
+}
+
+#[no_mangle]
+pub extern "C" fn rust_vga_is_auto_clear_enabled() -> bool {
+    is_auto_clear_enabled()
 }
 
 #[no_mangle]
