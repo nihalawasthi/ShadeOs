@@ -24,6 +24,7 @@ pub mod keyboard;
 pub mod bash;
 pub mod memory;
 pub mod elf;
+pub mod ext2;
 pub mod vga;
 pub mod syscalls;
 pub mod serial;
@@ -163,6 +164,61 @@ pub extern "C" fn rust_elf_load(path_ptr: *const u8) -> i32 {
     elf::rust_elf_load(path_ptr)
 }
 
+#[no_mangle]
+pub extern "C" fn rust_elf_init_dynamic_linking() {
+    elf::rust_elf_init_dynamic_linking()
+}
+
+#[no_mangle]
+pub extern "C" fn rust_elf_load_shared_library(lib_name: *const u8) -> u64 {
+    elf::rust_elf_load_shared_library(lib_name)
+}
+
+#[no_mangle]
+pub extern "C" fn rust_elf_resolve_symbol(symbol_name: *const u8) -> u64 {
+    elf::rust_elf_resolve_symbol(symbol_name)
+}
+
+#[no_mangle]
+pub extern "C" fn rust_elf_add_symbol(symbol_name: *const u8, address: u64) {
+    elf::rust_elf_add_symbol(symbol_name, address)
+}
+
+#[no_mangle]
+pub extern "C" fn rust_elf_get_loaded_library_count() -> u32 {
+    elf::rust_elf_get_loaded_library_count()
+}
+
+#[no_mangle]
+pub extern "C" fn rust_elf_get_global_symbol_count() -> u32 {
+    elf::rust_elf_get_global_symbol_count()
+}
+
+#[no_mangle]
+pub extern "C" fn rust_elf_test_dynamic_linking() {
+    elf::rust_elf_test_dynamic_linking()
+}
+
+#[no_mangle]
+pub extern "C" fn rust_ext2_init() {
+    ext2::ext2_init()
+}
+
+#[no_mangle]
+pub extern "C" fn rust_ext2_mount(device_id: i32) -> i32 {
+    ext2::ext2_mount(device_id)
+}
+
+#[no_mangle]
+pub extern "C" fn rust_ext2_unmount() -> i32 {
+    ext2::ext2_unmount()
+}
+
+#[no_mangle]
+pub extern "C" fn rust_ext2_test() {
+    ext2::ext2_test()
+}
+
 pub use vfs::*; // Export VFS functions
 pub use heap::*; // Export heap functions
 pub use memory::*; // Export memory functions
@@ -231,6 +287,8 @@ pub extern "C" fn rust_entry_point() {
         serial_write(b"[RUST] Hello from Rust!\n\0".as_ptr());
     }
     keyboard::init(); // Initialize the Rust keyboard buffer
+    rust_elf_init_dynamic_linking(); // Initialize dynamic linking system
+    ext2::ext2_init(); // Initialize ext2 filesystem support
 }
 
 // The scheduler tick function is now in scheduler.rs, so this duplicate is removed.

@@ -16,7 +16,7 @@ pub extern "C" fn rust_scheduler_tick() {
         let mut t = current;
         let mut best: *mut Task = core::ptr::null_mut();
         let mut best_priority = i32::MAX;
-        let mut first = true;
+        let _first = true;
         // Find the READY task with the highest priority (lowest value)
         loop {
             if (*t).state == 1 /* TASK_READY */ {

@@ -73,8 +73,18 @@ impl Shell {
 
     fn handle_command(&mut self) {
         match self.input.as_str() {
-            "help" => unsafe { crate::vga_print(b"Commands: help, ls\n\0".as_ptr()); },
+            "help" => unsafe { 
+                crate::vga_print(b"Commands: help, ls, ps, clear, elf-test, ext2-test\n\0".as_ptr()); 
+            },
             "ls" => unsafe { rust_vfs_ls(b"/\0".as_ptr()); },
+            "elf-test" => unsafe { 
+                extern "C" { fn rust_elf_test_dynamic_linking(); }
+                rust_elf_test_dynamic_linking();
+            },
+            "ext2-test" => unsafe { 
+                extern "C" { fn rust_ext2_test(); }
+                rust_ext2_test();
+            },
             _ => unsafe { crate::vga_print(b"Unknown command\n\0".as_ptr()); },
         }
         // Add to history
