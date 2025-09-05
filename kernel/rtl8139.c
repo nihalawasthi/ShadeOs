@@ -1,6 +1,8 @@
 #include "rtl8139.h"
 #include "kernel.h"
 #include "vga.h"
+#include "netdev.h"
+#include "string.h"
 
 #define PCI_CONFIG_ADDRESS 0xCF8
 #define PCI_CONFIG_DATA    0xCFC
@@ -26,20 +28,34 @@ static uint8_t rx_buffer[8192+16+1500];
 static int initialized = 0;
 static struct mac_addr mac;
 
+extern void net_input_eth_frame(const uint8_t *frame, int len);
+
 static void io_wait() { for (volatile int i = 0; i < 1000; i++); }
+
+static int rtl8139_send_frame(net_device_t *dev, const void *frame, int len) {
+    (void)dev;
+    if (!initialized) return -1;
+    /* Only one TX buffer for demo */
+    uint32_t tx_addr = RTL8139_IO_PORT + 0x20;
+    const uint8_t *p = (const uint8_t*)frame;
+    for (int i = 0; i < len; i++) outb(tx_addr + i, p[i]);
+    outl(RTL8139_IO_PORT + 0x10, (uint32_t)(uint64_t)tx_addr);
+    outl(RTL8139_IO_PORT + 0x10 + 4, len);
+    return 0;
+}
 
 void rtl8139_init() {
     vga_print("[NET] Initializing RTL8139...\n");
-    // Reset
+    /* Reset */
     outb(RTL8139_IO_PORT + RTL_REG_CMD, RTL_CMD_RESET);
     while (inb(RTL8139_IO_PORT + RTL_REG_CMD) & RTL_CMD_RESET);
-    // Set up RX buffer
+    /* Set up RX buffer */
     outl(RTL8139_IO_PORT + RTL_REG_RBSTART, (uint32_t)(uint64_t)rx_buffer);
-    // Enable RX and TX
+    /* Enable RX and TX */
     outb(RTL8139_IO_PORT + RTL_REG_CMD, RTL_CMD_RX_ENABLE | RTL_CMD_TX_ENABLE);
-    // Set RX config (accept all)
+    /* Set RX config (accept all) */
     outl(RTL8139_IO_PORT + RTL_REG_RCR, 0xf | (1<<7));
-    // Read MAC address
+    /* Read MAC address */
     for (int i = 0; i < 6; i++) mac.addr[i] = inb(RTL8139_IO_PORT + RTL_REG_IDR0 + i);
     vga_print("[NET] MAC: ");
     for (int i = 0; i < 6; i++) {
@@ -49,28 +65,30 @@ void rtl8139_init() {
     }
     vga_print("\n");
     initialized = 1;
+
+    /* Register as net device */
+    netdev_register("rtl8139", mac.addr, 1500, rtl8139_send_frame, (void*)0);
 }
 
 int rtl8139_send(const void* data, int len) {
     if (!initialized) return -1;
-    // Only one TX buffer for demo
-    uint32_t tx_addr = RTL8139_IO_PORT + 0x20;
-    for (int i = 0; i < len; i++) outb(tx_addr + i, ((const uint8_t*)data)[i]);
-    outl(RTL8139_IO_PORT + 0x10, (uint32_t)(uint64_t)tx_addr);
-    outl(RTL8139_IO_PORT + 0x10 + 4, len);
-    return 0;
+    /* Back-compat direct send */
+    return rtl8139_send_frame(0, data, len);
 }
 
 int rtl8139_poll_recv(void* buf, int maxlen) {
     if (!initialized) return -1;
-    // Poll for received packet (not robust, demo only)
+    /* Poll for received packet (not robust, demo only) */
     uint16_t isr = inw(RTL8139_IO_PORT + RTL_REG_ISR);
-    if (!(isr & 0x01)) return 0; // No packet
-    outw(RTL8139_IO_PORT + RTL_REG_ISR, 0x01); // Ack
+    if (!(isr & 0x01)) return 0; /* No packet */
+    outw(RTL8139_IO_PORT + RTL_REG_ISR, 0x01); /* Ack */
     int len = ((uint16_t*)rx_buffer)[1] - 4;
+    if (len < 0) return 0;
     if (len > maxlen) len = maxlen;
     memcpy(buf, rx_buffer + 4, len);
+    /* Also feed network layer */
+    net_input_eth_frame((const uint8_t*)buf, len);
     return len;
 }
 
-struct mac_addr rtl8139_get_mac() { return mac; } 
+struct mac_addr rtl8139_get_mac() { return mac; }

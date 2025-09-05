@@ -232,6 +232,22 @@ void kernel_main(uint64_t mb2_info_ptr) {
     blockdev_init(); // Initialize the C ramdisk block device
     rust_vga_print("[BOOT] Block Devices initialized.\n");
 
+    // Device framework + Network devices
+    extern void device_framework_init(void);
+    extern void netdev_init(void);
+    extern void arp_init(void);
+    extern void icmp_init(void);
+    extern void tcp_init(void);
+    device_framework_init();
+    netdev_init();
+    arp_init();
+    icmp_init();
+    tcp_init();
+
+    // PCI bus
+    extern void pci_init(void);
+    pci_init();
+
     // Network
     rtl8139_init();
     serial_write("[BOOT] RTL8139 network driver initialized\n");

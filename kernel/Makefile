@@ -1,5 +1,7 @@
 # Add multiboot.c to the kernel sources
-KERNEL_OBJS = kernel.o vga.o gdt.o idt.o memory.o multiboot.o pmm.o paging.o heap.o timer.o keyboard.o serial.o vfs.o pkg.o rtl8139.o net.o task.o syscall.o fat.o ext2.o syscall_entry.o helpers.o 
+KERNEL_OBJS = kernel.o vga.o gdt.o idt.o memory.o multiboot.o pmm.o paging.o heap.o timer.o keyboard.o serial.o vfs.o pkg.o \
+	device.o netdev.o pci.o rtl8139.o arp.o icmp.o net.o tcp.o socket.o http.o \
+	task.o syscall.o fat.o ext2.o syscall_entry.o helpers.o 
 
 fat.o: fat.c
 	$(CC) $(CFLAGS) -c $< -o $@

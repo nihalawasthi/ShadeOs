@@ -33,6 +33,21 @@ extern "C" {
     fn rust_process_list();
     fn pmm_total_memory() -> u64;
     fn pmm_free_memory() -> u64;
+    fn icmp_send_echo_request(dst_ip: *const u8, id: u16, seq: u16, data: *const u8, dlen: i32) -> i32;
+    fn netstat_dump();
+    fn http_get(url: *const u8, out_buf: *mut u8, out_len: i32) -> i32;
+
+    // socket-level FFI
+    fn sock_socket() -> i32;
+    fn sock_bind(s: i32, ip: *const u8, port: u16) -> i32;
+    fn sock_listen(s: i32, backlog: i32) -> i32;
+    fn sock_accept(s: i32, out_ip: *mut u8, out_port: *mut u16) -> i32;
+    fn sock_connect(s: i32, ip: *const u8, port: u16) -> i32;
+    fn sock_send(s: i32, buf: *const u8, len: usize) -> isize;
+    fn sock_recv(s: i32, buf: *mut u8, len: usize) -> isize;
+    fn sock_close(s: i32) -> i32;
+    fn sock_set_nonblock(s: i32, nonblock: i32) -> i32;
+    fn sock_poll(fds: *mut i32, nfds: i32, events_out: *mut i32, timeout_ms: i32) -> i32;
 }
 
 // Utility functions
@@ -626,8 +641,9 @@ impl BashShell {
             b"gunzip" => self.cmd_gunzip_heap(args_slice, argc),
             b"wget" => self.cmd_wget_heap(args_slice, argc),
             b"curl" => self.cmd_curl_heap(args_slice, argc),
-            b"ping" => self.cmd_ping_heap(args_slice, argc),
-            b"netstat" => self.cmd_netstat(), //works
+            b"ping" => self.cmd_ping(args_slice, argc),
+            b"httpget" => self.cmd_httpget_heap(args_slice, argc),
+            b"netstat" => self.cmd_netstat(),
             b"ifconfig" => self.cmd_ifconfig(),//works
             b"route" => self.cmd_route(),//works
             b"ssh" => self.cmd_ssh_heap(args_slice, argc),
@@ -1430,28 +1446,35 @@ impl BashShell {
         self.last_exit_code = 1;
     }
     
-    fn cmd_curl_heap(&mut self, args_buffer: &[u8], argc: usize) {
-        if argc < 2 {
-            print_str(b"Usage: curl <url>\n");
-            self.last_exit_code = 1;
-            return;
-        }
-        
-        let _url = self.get_arg_heap(args_buffer, 1);
-        print_str(b"curl: not implemented\n");
+    fn cmd_curl_heap(&mut self, _args_buffer: &[u8], _argc: usize) {
+        print_str(b"curl: not implemented, use httpget <ip> [path]\n");
         self.last_exit_code = 1;
     }
     
-    fn cmd_ping_heap(&mut self, args_buffer: &[u8], argc: usize) {
-        if argc < 2 {
-            print_str(b"Usage: ping <host>\n");
-            self.last_exit_code = 1;
-            return;
+    fn cmd_ping(args: &[&str]) {
+        if args.len() < 2 { println!("usage: ping <a.b.c.d>"); return; }
+        let ip_parts: Vec<u8> = args[1].split('.').filter_map(|s| s.parse::<u8>().ok()).collect();
+        if ip_parts.len() != 4 { println!("bad ip"); return; }
+        unsafe {
+            let ret = icmp_send_echo_request(ip_parts.as_ptr(), 0x1234, 1, b"rust-ping\0".as_ptr(), 9);
+            println!("icmp_send returned {}", ret);
         }
-        
-        let _host = self.get_arg_heap(args_buffer, 1);
-        print_str(b"ping: not implemented\n");
-        self.last_exit_code = 1;
+    }
+
+    fn cmd_httpget(args: &[&str]) {
+        if args.len() < 2 { println!("usage: httpget <url>"); return; }
+        let url = args[1].as_bytes();
+        // allocate buffer in Rust and pass pointer to C http_get helper
+        let mut out = vec![0u8; 8192];
+        unsafe {
+            let ret = http_get(url.as_ptr(), out.as_mut_ptr(), out.len() as i32);
+            if ret > 0 {
+                let s = core::str::from_utf8(&out[..ret as usize]).unwrap_or("<binary>");
+                println!("http_get response:\n{}", s);
+            } else {
+                println!("http_get failed");
+            }
+        }
     }
     
     fn cmd_ssh_heap(&mut self, args_buffer: &[u8], argc: usize) {
@@ -2489,8 +2512,7 @@ impl BashShell {
     }
     
     fn cmd_netstat(&mut self) {
-        print_str(b"Active Internet connections (w/o servers)\n");
-        print_str(b"Proto Recv-Q Send-Q Local Address           Foreign Address         State\n");
+        unsafe { netstat_dump(); }
         self.last_exit_code = 0;
     }
     

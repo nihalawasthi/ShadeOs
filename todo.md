@@ -44,24 +44,28 @@
 - Shell commands for testing (ext2-test)
 - Block device integration with existing VFS layer
 
-## 🔄 IN PROGRESS TASKS (0/16)
+## 🔄 IN PROGRESS TASKS (2/16)
 
-- No tasks currently in progress
+### 5. Network Stack & TCP/IP Implementation 🚧 IN PROGRESS
+- Implemented: IPv4, ARP (cache + broadcast requests), ICMP echo (ping), UDP with checksums, minimal TCP (handshake, simple send/recv, ACK), basic socket API (UDP/TCP), NIC -> net dispatch, IPv4 header checksum validation
+- Implemented utilities: netstat_dump() (kernel C), http_get() stub
+- Remaining for “industry-standard” completeness:
+  - TCP: retransmission timers, exponential backoff, connection queues (listen/accept), orderly close (FIN/FIN-ACK/TIME_WAIT), out-of-order reassembly, segmentation (MSS), window management, congestion control (slow-start/CA), window scaling, SACK options, RTO calculation (RFC6298)
+  - UDP: bind/ephemeral ports, demux by dst port, ICMP Port Unreachable handling
+  - IPv4: fragmentation/reassembly, PMTU discovery, routing (gateway/ARP for off-subnet), DHCP (optional)
+  - Sockets: blocking/non-blocking modes, poll/select/epoll equivalents, error propagation, SO_* options
+  - Tools: full ping (with reply tracking), traceroute, netstat via shell, simple HTTP client/server with proper stream recv
 
-### 5. Network Stack & TCP/IP Implementation ❌ NOT STARTED
-- Basic network driver (RTL8139) exists but no TCP/IP stack
-- **NEEDED**: TCP/IP protocol stack
-- **NEEDED**: Socket API implementation
-- **NEEDED**: Network utilities (ping, netstat, etc.)
-- **NEEDED**: HTTP client/server capabilities
+### 6. Device Driver Framework 🚧 IN PROGRESS
+- Implemented: generic device registry (register/unregister, tree dump), net device registry (register netdev, default device), RTL8139 registered as netdev, PCI bus scan (detects RTL8139 and sets IO base)
+- Remaining for completion:
+  - PCI: full enumeration with BAR sizing, enable bus mastering/IO space, MSI/MSI-X where applicable
+  - Driver model: probe/bind/unbind callbacks, hotplug events, power management (suspend/resume)
+  - Interrupt-driven RX/TX for NIC; descriptor rings and proper DMA (RTL8139)
+  - Dynamic driver loading/unloading (module system)
+  - Device tree/ACPI parsing (optional)
 
-### 6. Device Driver Framework ❌ NOT STARTED
-- **NEEDED**: Generic device driver interface
-- **NEEDED**: Plug-and-play device detection
-- **NEEDED**: Driver loading/unloading mechanism
-- **NEEDED**: Device tree support
-
-## ❌ PENDING TASKS (10/16)
+## ❌ PENDING TASKS (9/16)
 
 ### 7. Inter-Process Communication (IPC) ❌ NOT STARTED
 - **NEEDED**: Pipes and named pipes (FIFOs)
@@ -129,8 +133,8 @@
 ## 📊 PROGRESS SUMMARY
 
 - **Completed**: 5/16 tasks (31.25%)
-- **In Progress**: 0/16 tasks (0%)
-- **Pending**: 10/16 tasks (68.75%)
+- **In Progress**: 2/16 tasks (12.5%)
+- **Pending**: 9/16 tasks (56.25%)
 
 ## 🎯 NEXT PRIORITIES
 

@@ -20,6 +20,7 @@ void timer_interrupt_wrapper(registers_t regs);
 #define PIT_FREQUENCY 1193182
 
 static volatile uint64_t timer_ticks = 0;
+static uint32_t pit_freq_hz = 100;
 
 void timer_init(uint32_t frequency) {
     uint16_t divisor = (uint16_t)(PIT_FREQUENCY / frequency);
@@ -27,6 +28,7 @@ void timer_init(uint32_t frequency) {
     outb(PIT_CHANNEL0, divisor & 0xFF); // Low byte
     outb(PIT_CHANNEL0, (divisor >> 8) & 0xFF); // High byte
     timer_ticks = 0;
+    pit_freq_hz = (frequency == 0) ? 100 : frequency;
 }
 
 void timer_interrupt_handler() {
@@ -49,6 +51,11 @@ void timer_interrupt_wrapper(registers_t regs) {
     timer_interrupt_handler();
 }
 
-uint64_t timer_get_ticks() {
-    return timer_ticks;
-} 
+uint64_t timer_get_ticks() { return timer_ticks; }
+
+uint64_t kernel_uptime_ms(void) {
+    /* Convert ticks to milliseconds using current PIT frequency. */
+    if (pit_freq_hz == 0) return 0;
+    uint64_t ticks = timer_ticks;
+    return (ticks * 1000ULL) / (uint64_t)pit_freq_hz;
+}
