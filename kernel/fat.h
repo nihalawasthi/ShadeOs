@@ -10,4 +10,4 @@ int fat_read(const char* path, void* buf, int maxlen);
 int fat_write(const char* path, const void* buf, int len);
 int fat_create(const char* path);
 
-#endif 
+#endif

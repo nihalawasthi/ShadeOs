@@ -1,13 +1,13 @@
 #include "netdev.h"
 #include "serial.h"
-#include "string.h"
+#include "kernel.h" // For memset, memcpy
 
 static net_device_t netdevs[NETDEV_MAX];
 static int in_use[NETDEV_MAX];
 static int default_idx = -1;
 
 void netdev_init(void) {
-    for (int i=0;i<NETDEV_MAX;++i) in_use[i]=0;
+    memset(in_use, 0, sizeof(in_use));
     default_idx = -1;
 }
 

@@ -8,4 +8,4 @@ int rtl8139_send(const void* data, int len);
 int rtl8139_poll_recv(void* buf, int maxlen);
 struct mac_addr rtl8139_get_mac();
 
-#endif 
+#endif

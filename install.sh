@@ -80,13 +80,12 @@ else
 fi
 
 # Installation complete
+clear
 echo ""
 print_success "🎉 ShadeOS Installation Complete!"
 echo ""
 echo "📋 To run ShadeOS:"
 echo "  ./run.sh           - Run ShadeOS in QEMU"
-echo "  make run           - Alternative run command"
-echo "  make debug         - Debug with GDB"
 echo ""
 echo "📁 Generated files:"
 echo "  kernel.bin         - Kernel binary"

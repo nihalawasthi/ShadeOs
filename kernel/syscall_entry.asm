@@ -10,4 +10,4 @@ syscall_entry:
     mov rsi, rdi      ; RSI = arg1
     mov rdi, rax      ; RDI = syscall number
     call syscall_handler
-    iretq 
+    iretq

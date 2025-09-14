@@ -5,6 +5,7 @@
 #include "endian.h"
 #include "arp.h"
 #include "icmp.h"
+#include "tcp.h"
 #include "netdev.h"
 
 static struct ip_addr local_ip_s;
@@ -170,9 +171,8 @@ void net_input_eth_frame(const uint8_t *frame, int len) {
                 udp_q_push(src_ip, src_port, udp_data, udp_len);
             }
         } else if (proto == 6) {
-            /* TCP: handled in tcp.c if present */
-            extern void tcp_input_ipv4(const uint8_t *src_ip, const uint8_t *seg, int len);
-            tcp_input_ipv4(src_ip, ip_payload, ip_payload_len);
+            /* TCP */
+            tcp_input_ipv4(payload, ip_hdr_len, ip_payload, ip_payload_len);
         }
     }
 }

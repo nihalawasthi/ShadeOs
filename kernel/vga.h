@@ -9,4 +9,4 @@ void vga_set_color(uint8_t color);
 void vga_putchar(char c);
 void vga_print(const char* str);
 
-#endif // VGA_H 
+#endif // VGA_H

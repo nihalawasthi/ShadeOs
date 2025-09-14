@@ -80,4 +80,4 @@ pub extern "C" fn serial_write_dec(label: *const u8, value: u64) {
     }
     serial_write(buf[i+1..].as_ptr());
     serial_write(b"\n\0".as_ptr());
-} 
+}

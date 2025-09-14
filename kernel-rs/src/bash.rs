@@ -1,10 +1,7 @@
 extern crate alloc;
-use alloc::boxed::Box;
-use crate::vfs;
-use crate::heap::Block;
-use core::str;
+use alloc::vec::Vec;
+use alloc::vec;
 use core::iter::Iterator;
-use alloc::string::ToString;
 use core::option::Option;
 use core::option::Option::{Some, None};
 
@@ -440,7 +437,6 @@ impl BashShell {
             self.update_prompt();
             print_str(get_str(&self.prompt));
             let mut input = [0u8; MAX_CMD_LEN];
-            print_str(b"\nroot@shadeos: ");
             if self.read_line(&mut input) {
                 unsafe { serial_write(b"[BASH-DEBUG] After read_line (got input)\n\0".as_ptr()); }
                 // Debug: print raw input buffer
@@ -602,20 +598,20 @@ impl BashShell {
         match cmd {
             b"help" => self.cmd_help(), //work
             b"exit" => self.cmd_exit_heap(args_slice, argc), //work but needs to actually exit the shell
-            b"cd" => self.cmd_cd_heap(args_slice, argc), //cant test
-            b"pwd" => self.cmd_pwd_heap(args_slice, argc),
-            b"ls" => self.cmd_ls_heap(args_slice, argc), //some giberish
+            b"cd" => self.cmd_cd_heap(args_slice, argc), //works
+            b"pwd" => self.cmd_pwd_heap(args_slice, argc),//works
+            b"ls" => self.cmd_ls_heap(args_slice, argc), //works but returns unneeded gibrish too
             b"cat" => self.cmd_cat_heap(args_slice, argc), //cant test
-            b"echo" => self.cmd_echo_heap(args_slice, argc),//doesnt work
-            b"mkdir" => self.cmd_mkdir_heap(args_slice, argc),//cant handle the args
-            b"touch" => self.cmd_touch_heap(args_slice, argc),//cant handle the args
-            b"rm" => self.cmd_rm_heap(args_slice, argc),//cant test
+            b"echo" => self.cmd_echo_heap(args_slice, argc),//works
+            b"mkdir" => self.cmd_mkdir_heap(args_slice, argc),//works
+            b"touch" => self.cmd_touch_heap(args_slice, argc),//works
+            b"rm" => self.cmd_rm_heap(args_slice, argc),//works
             b"env" => self.cmd_env(),
-            b"export" => self.cmd_export_heap(args_slice, argc),
-            b"alias" => self.cmd_alias_heap(args_slice, argc),
-            b"history" => self.cmd_history(), // work
-            b"clear" => self.cmd_clear(), // work
-            b"date" => self.cmd_date(), // work
+            b"export" => self.cmd_export_heap(args_slice, argc), //assumed to be working cant test due to keyboard inout limitations doesnt supports alternate chars
+            b"alias" => self.cmd_alias_heap(args_slice, argc), //works
+            b"history" => self.cmd_history(), // works
+            b"clear" => self.cmd_clear(), // works
+            b"date" => self.cmd_date(), // works but date is incorrect
             b"uptime" => self.cmd_uptime(), // work
             b"ps" => self.cmd_ps(), // work
             b"kill" => self.cmd_kill_heap(args_slice, argc), // work
@@ -623,9 +619,18 @@ impl BashShell {
             b"whoami" => self.cmd_whoami(), // work
             b"uname" => self.cmd_uname(), // work
             b"free" => self.cmd_free(),//works
-            b"df" => self.cmd_df(),
+            b"df" => self.cmd_df(), //works
+            b"mv" => self.cmd_mv_heap(args_slice, argc), //not implemented
+            b"ifconfig" => self.cmd_ifconfig(),//works with default will be able to test soon after tcp implementation
+            b"route" => self.cmd_route(),//works
+            b"htop" => self.cmd_htop(),//works
             b"mount" => self.cmd_mount(),
-            b"mv" => self.cmd_mv_heap(args_slice, argc),
+            b"ssh" => self.cmd_ssh_heap(args_slice, argc),
+            b"scp" => self.cmd_scp_heap(args_slice, argc),
+            b"rsync" => self.cmd_rsync_heap(args_slice, argc),
+            b"top" => self.cmd_top(),
+            b"iotop" => self.cmd_iotop(),
+            b"lsof" => self.cmd_lsof(),
             b"chmod" => self.cmd_chmod_heap(args_slice, argc),
             b"chown" => self.cmd_chown_heap(args_slice, argc),
             b"ln" => self.cmd_ln_heap(args_slice, argc),
@@ -641,18 +646,9 @@ impl BashShell {
             b"gunzip" => self.cmd_gunzip_heap(args_slice, argc),
             b"wget" => self.cmd_wget_heap(args_slice, argc),
             b"curl" => self.cmd_curl_heap(args_slice, argc),
-            b"ping" => self.cmd_ping(args_slice, argc),
+            b"ping" => self.cmd_ping_heap(args_slice, argc),
             b"httpget" => self.cmd_httpget_heap(args_slice, argc),
             b"netstat" => self.cmd_netstat(),
-            b"ifconfig" => self.cmd_ifconfig(),//works
-            b"route" => self.cmd_route(),//works
-            b"ssh" => self.cmd_ssh_heap(args_slice, argc),
-            b"scp" => self.cmd_scp_heap(args_slice, argc),
-            b"rsync" => self.cmd_rsync_heap(args_slice, argc),
-            b"top" => self.cmd_top(),
-            b"htop" => self.cmd_htop(),//works
-            b"iotop" => self.cmd_iotop(),
-            b"lsof" => self.cmd_lsof(),
             b"strace" => self.cmd_strace_heap(args_slice, argc),
             b"gdb" => self.cmd_gdb_heap(args_slice, argc),
             b"valgrind" => self.cmd_valgrind_heap(args_slice, argc),
@@ -1451,29 +1447,54 @@ impl BashShell {
         self.last_exit_code = 1;
     }
     
-    fn cmd_ping(args: &[&str]) {
-        if args.len() < 2 { println!("usage: ping <a.b.c.d>"); return; }
-        let ip_parts: Vec<u8> = args[1].split('.').filter_map(|s| s.parse::<u8>().ok()).collect();
-        if ip_parts.len() != 4 { println!("bad ip"); return; }
-        unsafe {
-            let ret = icmp_send_echo_request(ip_parts.as_ptr(), 0x1234, 1, b"rust-ping\0".as_ptr(), 9);
-            println!("icmp_send returned {}", ret);
+    fn cmd_ping_heap(&mut self, args_buffer: &[u8], argc: usize) {
+        if argc < 2 {
+            print_str(b"usage: ping <a.b.c.d>\n");
+            self.last_exit_code = 1;
+            return;
+        }
+        let ip_str_slice = self.get_arg_heap(args_buffer, 1);
+        if let Ok(ip_str) = core::str::from_utf8(ip_str_slice) {
+            let ip_parts: Vec<u8> = ip_str.split('.').filter_map(|s| s.parse::<u8>().ok()).collect();
+            if ip_parts.len() != 4 {
+                print_str(b"bad ip\n");
+                self.last_exit_code = 1;
+                return;
+            }
+            unsafe {
+                let ret = icmp_send_echo_request(ip_parts.as_ptr(), 0x1234, 1, b"rust-ping\0".as_ptr(), 9);
+                print_str(b"icmp_send returned ");
+                if ret >= 0 {
+                    print_int(ret as usize);
+                } else {
+                    print_str(b"-");
+                    print_int(-ret as usize);
+                }
+                print_str(b"\n");
+                self.last_exit_code = if ret == 0 { 0 } else { 1 };
+            }
+        } else {
+            print_str(b"ping: invalid ip address format (not utf8)\n");
+            self.last_exit_code = 1;
         }
     }
 
-    fn cmd_httpget(args: &[&str]) {
-        if args.len() < 2 { println!("usage: httpget <url>"); return; }
-        let url = args[1].as_bytes();
+    fn cmd_httpget_heap(&mut self, args_buffer: &[u8], argc: usize) {
+        if argc < 2 { print_str(b"usage: httpget <url>\n"); self.last_exit_code = 1; return; }
+        let url = self.get_arg_heap(args_buffer, 1);
         // allocate buffer in Rust and pass pointer to C http_get helper
         let mut out = vec![0u8; 8192];
         unsafe {
             let ret = http_get(url.as_ptr(), out.as_mut_ptr(), out.len() as i32);
             if ret > 0 {
                 let s = core::str::from_utf8(&out[..ret as usize]).unwrap_or("<binary>");
-                println!("http_get response:\n{}", s);
+                print_str(b"http_get response:\n");
+                print_str(s.as_bytes());
+                print_str(b"\n");
             } else {
-                println!("http_get failed");
+                print_str(b"http_get failed\n");
             }
+            self.last_exit_code = if ret > 0 { 0 } else { 1 };
         }
     }
     

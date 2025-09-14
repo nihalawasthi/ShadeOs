@@ -4,6 +4,7 @@
 #include "heap.h"
 #include "timer.h"
 #include "keyboard.h"
+#include "http.h"
 #include "serial.h"
 #include "vfs.h" // Keep this for shell, but its implementation will change
 #include "rtl8139.h"
@@ -244,6 +245,7 @@ void kernel_main(uint64_t mb2_info_ptr) {
     icmp_init();
     tcp_init();
 
+
     // PCI bus
     extern void pci_init(void);
     pci_init();
@@ -251,9 +253,15 @@ void kernel_main(uint64_t mb2_info_ptr) {
     // Network
     rtl8139_init();
     serial_write("[BOOT] RTL8139 network driver initialized\n");
-    struct ip_addr ip = { {10,0,2,15} };
+    struct ip_addr ip = { {10, 0, 2, 15} };
     net_init(ip);
     rust_vga_print("[BOOT] Network stack initialized\n");
+
+    // TCP Test: Attempt to fetch a page from the QEMU host
+    serial_write("[TEST] Starting TCP HTTP GET test...\n");
+    uint8_t qemu_host_ip[4] = {10, 0, 2, 2};
+    // http_get(qemu_host_ip, "10.0.2.2", "/");
+    serial_write("[TEST] TCP test finished.\n");
 
     // Multitasking    
     task_init();

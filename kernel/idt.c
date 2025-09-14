@@ -99,6 +99,8 @@ void isr_handler(uint64_t int_no, uint64_t err_code) {
         vga_set_color(0x0C);
         vga_print("[INTERRUPT] Invalid Opcode Exception!\n");
         vga_set_color(0x0F);
+        serial_write("[PANIC] Invalid Opcode! Halting.\n");
+        while(1) { __asm__ volatile("cli; hlt"); }
     }
     if (int_no == 14) {
         // Page Fault

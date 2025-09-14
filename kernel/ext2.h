@@ -210,4 +210,4 @@ int ext2_vfs_rmdir(const char* path);
 int ext2_vfs_unlink(const char* path);
 int ext2_vfs_stat(const char* path, struct stat* statbuf);
 
-#endif // EXT2_H 
+#endif // EXT2_H

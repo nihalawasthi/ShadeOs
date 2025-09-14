@@ -9,14 +9,33 @@ uint8_t* heap_start = (uint8_t*)0x100000; // 1MB
 uint8_t* heap_current = (uint8_t*)0x100000;
 static const uint8_t* heap_end = (uint8_t*)0x200000; // 2MB limit
 
+// Kernel memory boundaries from linker script
+extern uint8_t _kernel_start, _kernel_end;
+
 // Validation functions
 int is_valid_pointer(const void* ptr) {
     if (!ptr) return 0;
     uintptr_t addr = (uintptr_t)ptr;
-    // Check if pointer is in valid memory range
-    return (addr >= 0x100000 && addr < 0x200000) || 
-           (addr >= 0x200000 && addr < 0x300000) || 
-           (addr >= 0x1000 && addr < 0x100000);
+    uintptr_t kernel_start_addr = (uintptr_t)&_kernel_start;
+    uintptr_t kernel_end_addr = (uintptr_t)&_kernel_end;
+
+    // Pointer is within the kernel's own loaded memory space (.text, .data, .bss)
+    if (addr >= kernel_start_addr && addr < kernel_end_addr) {
+        return 1;
+    }
+
+    // Pointer is in a region managed by the PMM/heap allocator.
+    // This is a broad check, assuming memory above the kernel is valid.
+    if (addr >= kernel_end_addr && addr < (512 * 1024 * 1024)) { // Up to 512MB
+        return 1;
+    }
+
+    // Allow low memory for hardware access (e.g., VGA buffer at 0xB8000)
+    if (addr >= 0x1000 && addr < 0x100000) {
+        return 1;
+    }
+
+    return 0; // Pointer is likely invalid
 }
 
 int is_valid_string(const char* str, size_t max_len) {

@@ -66,4 +66,4 @@ void fat_ls(const char* path) {
 // FAT stubs for VFS linkage
 int fat_create(const char* name) { return -1; }
 int fat_read(const char* path, void* buf, int maxlen) { return -1; }
-int fat_write(const char* path, const void* buf, int len) { return -1; } 
+int fat_write(const char* path, const void* buf, int len) { return -1; }

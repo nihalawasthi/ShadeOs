@@ -281,10 +281,10 @@ pub fn print_dec(value: u64) {
 pub fn enable_cursor(cursor_start: u8, cursor_end: u8) {
     unsafe {
         outb(0x3D4, 0x0A);
-        outb(0x3D5, (cursor_start & 0x1F));
+        outb(0x3D5, cursor_start & 0x1F);
         
         outb(0x3D4, 0x0B);
-        outb(0x3D5, (cursor_end & 0x1F));
+        outb(0x3D5, cursor_end & 0x1F);
     }
 }
 

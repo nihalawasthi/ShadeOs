@@ -1,9 +1,8 @@
 #include "arp.h"
 #include "endian.h"
 #include "net.h"
-#include <string.h>
+#include "kernel.h"
 #include <stdint.h>
-#include <stdlib.h>
 
 /* Replace these with your kernel's time and send helpers */
 extern uint64_t kernel_uptime_ms(void);

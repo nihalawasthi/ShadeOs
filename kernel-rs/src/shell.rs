@@ -99,4 +99,4 @@ impl Shell {
 pub extern "C" fn rust_shell_main() {
     let mut shell = Shell::new();
     shell.run();
-} 
+}

@@ -24,7 +24,7 @@ echo "- Close window to exit"
 echo ""
 
 # Give user a moment to read
-sleep 2
+sleep 1
 
 qemu-system-x86_64 \
     -cdrom shadeOS.iso \

@@ -11,4 +11,4 @@ void free_page(void* addr);
 uint64_t pmm_total_memory();
 uint64_t pmm_free_memory();
 
-#endif 
+#endif

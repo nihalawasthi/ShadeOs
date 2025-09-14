@@ -1,7 +1,3 @@
-use alloc::string::String;
-use alloc::vec::Vec;
-use core::ptr;
-
 extern "C" {
     fn serial_write(s: *const u8);
     fn vga_print(s: *const u8);
@@ -361,4 +357,4 @@ fn serial_write_hex(value: u64) {
         
         serial_write(buf.as_ptr());
     }
-} 
+}

@@ -1,5 +1,5 @@
 use core::mem::size_of;
-use core::ptr::{null_mut, NonNull};
+use core::ptr::null_mut;
 
 extern "C" {
     fn serial_write(s: *const u8);
@@ -169,4 +169,3 @@ pub extern "C" fn rust_heap_validate() -> bool {
 pub extern "C" fn rust_heap_stats() -> (usize, usize, usize) {
     (0, 0, 0) // Not implemented for bump allocator
 }
-

@@ -1,5 +1,3 @@
-use core::ffi::c_void;
-use core::ptr;
 use crate::process::Task;
 
 extern "C" {
@@ -36,4 +34,4 @@ pub extern "C" fn rust_scheduler_tick() {
             task_switch(old_rsp, new_rsp);
         }
     }
-} 
+}

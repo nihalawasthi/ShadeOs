@@ -44,7 +44,6 @@ int memcmp(const void* s1, const void* s2, size_t n);
 int snprintf(char* str, size_t size, const char* format, ...);
 int sscanf(const char* str, const char* format, ...);
 
-
 // Port I/O
 uint8_t inb(uint16_t port);
 void outb(uint16_t port, uint8_t data);
@@ -55,6 +54,16 @@ void outl(uint16_t port, uint32_t data);
 
 // Multiboot2 memory map parsing
 void parse_multiboot2_memory_map(uint64_t mb2_info_ptr);
+
+// Scheduler functions
+void scheduler_sleep(void* wait_channel);
+void scheduler_wakeup(void* wait_channel);
+
+// Logging function
+void kernel_log(const char* format, ...);
+
+// Timer function
+void timer_register_periodic(void (*callback)(void), uint32_t interval_ms);
 
 void kernel_main(uint64_t mb2_info_ptr);
 

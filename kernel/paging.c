@@ -192,4 +192,4 @@ void rust_map_page(uint64_t pml4_phys, uint64_t virt, uint64_t phys, uint64_t fl
     pml4_table = (uint64_t*)pml4_phys;
     map_page(virt, phys, flags);
     pml4_table = old_pml4;
-} 
+}

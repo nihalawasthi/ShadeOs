@@ -1,5 +1,3 @@
-use core::mem::size_of;
-use core::ptr::{null_mut, NonNull};
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::iter::Iterator;

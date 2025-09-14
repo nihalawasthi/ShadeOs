@@ -46,4 +46,4 @@ void pkg_info(const char* name) {
     int n = vfs_read(node, buf, 127);
     if (n > 0) vga_print(buf);
     vga_print("\n");
-} 
+}

@@ -1,7 +1,10 @@
 #ifndef KERNEL_TCP_H
 #define KERNEL_TCP_H
 
-#include <stdint.h>
+#include "kernel.h"
+
+/* POSIX compliance */
+typedef long ssize_t;
 
 #define TCP_MSS 1460
 #define TCP_RETRANSMIT_MAX 5
@@ -34,6 +37,6 @@ int sock_set_nonblock(int s, int nonblock);
 int sock_poll(int *fds, int nfds, int *events_out, int timeout_ms);
 
 /* utility for netstat dump */
-void netstat_dump(void);
+void tcp_dump_pcbs(void);
 
 #endif /* KERNEL_TCP_H */

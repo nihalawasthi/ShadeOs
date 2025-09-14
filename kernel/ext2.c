@@ -689,4 +689,4 @@ int ext2_vfs_stat(const char* path, struct stat* statbuf) {
     statbuf->st_ctime = inode.i_ctime;
     
     return 0;
-} 
+}

@@ -1,26 +1,14 @@
-/*
-  Compact but full-featured TCP implementation for ShadeOS:
-  - retransmission timers with RTO and exponential backoff
-  - accept backlog and passive open
-  - graceful close with FIN/ACK and TIME_WAIT
-  - basic segmentation (MSS) and reassembly for in-order delivery
-  - socket layer with blocking/non-blocking and simple poll
-*/
 #include "tcp.h"
-#include <stdlib.h>
-#include <string.h>
-#include <stdio.h>
-#include <stdint.h>
+#include "heap.h"
+#include "endian.h"
+#include "net.h"
+#include "serial.h"
 
-extern int net_ipv4_send(const uint8_t dst_ip[4], uint8_t proto, const void *payload, int payload_len);
 extern uint64_t kernel_uptime_ms(void);
 extern void kernel_log(const char *fmt, ...);
 extern void scheduler_sleep(void *wait_channel);
 extern void scheduler_wakeup(void *wait_channel);
-extern void timer_register_periodic(void (*fn)(void), int ms); /* call every ms */
-extern uint8_t local_ip[4];
-extern uint16_t htons(uint16_t);
-extern uint16_t ntohs(uint16_t);
+extern void timer_register_periodic(void (*fn)(void), uint32_t ms); /* call every ms */
 
 typedef enum {
     TCP_CLOSED = 0,
@@ -34,6 +22,18 @@ typedef enum {
     TCP_LAST_ACK,
     TCP_TIME_WAIT
 } tcp_state_t;
+
+typedef enum {
+    TCP_CA_SLOW_START = 0,
+    TCP_CA_CONGESTION_AVOIDANCE,
+    TCP_CA_FAST_RECOVERY
+} tcp_ca_state_t;
+
+typedef struct rtt_sample {
+    uint32_t seq;
+    uint64_t ts_sent;
+    struct rtt_sample *next;
+} rtt_sample_t;
 
 typedef struct tx_seg {
     uint32_t seq;
@@ -54,7 +54,7 @@ typedef struct rx_seg {
 
 #define MAX_SOCKETS 256
 #define SEND_BUF_SIZE (64*1024)
-#define RECV_BUF_SIZE (64*1024)
+#define RECV_BUF_SIZE (65535)
 
 typedef struct tcp_socket {
     int used;
@@ -72,6 +72,20 @@ typedef struct tcp_socket {
     uint32_t snd_una; /* oldest unacked */
     uint32_t snd_nxt; /* next to use */
     uint32_t rcv_nxt; /* next expected */
+
+    /* congestion control */
+    tcp_ca_state_t ca_state;
+    uint32_t cwnd;          /* congestion window */
+    uint32_t ssthresh;      /* slow start threshold */
+    uint32_t snd_wnd;       /* peer's advertised window */
+    uint32_t max_window;    /* maximum window seen */
+    uint32_t duplicate_acks; /* count of duplicate ACKs */
+    
+    /* RTT estimation (RFC 6298) */
+    uint32_t srtt;          /* smoothed RTT in ms */
+    uint32_t rttvar;        /* RTT variation in ms */
+    uint32_t rto;           /* retransmission timeout in ms */
+    rtt_sample_t *rtt_samples; /* pending RTT samples */
 
     /* retransmit queue (segmented packets sent waiting for ACK) */
     tx_seg_t *tx_head, *tx_tail;
@@ -105,40 +119,91 @@ typedef struct tcp_socket {
 static tcp_socket_t sockets[MAX_SOCKETS];
 static tcp_socket_t *conn_list = NULL;
 
+#define TCP_RTO_MIN 200     /* minimum RTO in ms */
+#define TCP_RTO_MAX 60000   /* maximum RTO in ms */
+#define TCP_RTO_INITIAL 1000 /* initial RTO in ms */
+
 /* helper: find free socket */
 static tcp_socket_t *alloc_socket(void) {
+    serial_write("[TCP] alloc_socket: entered\n");
     for (int i = 0; i < MAX_SOCKETS; ++i) {
         if (!sockets[i].used) {
+            serial_write("[TCP] alloc_socket: found free socket struct.\n");
             memset(&sockets[i], 0, sizeof(tcp_socket_t));
+            serial_write("[TCP] alloc_socket: memset OK.\n");
             sockets[i].used = 1;
-            sockets[i].send_buf = malloc(SEND_BUF_SIZE);
-            sockets[i].recv_buf = malloc(RECV_BUF_SIZE);
-            /* initialize RTO defaults */
+            serial_write("[TCP] alloc_socket: calling kmalloc for send_buf...\n");
+            sockets[i].send_buf = kmalloc(SEND_BUF_SIZE);
+            if (!sockets[i].send_buf) {
+                serial_write("[TCP] alloc_socket: kmalloc for send_buf FAILED.\n");
+                sockets[i].used = 0;
+                return NULL;
+            }
+            serial_write("[TCP] alloc_socket: kmalloc for send_buf OK.\n");
+            serial_write("[TCP] alloc_socket: calling kmalloc for recv_buf...\n");
+            sockets[i].recv_buf = kmalloc(RECV_BUF_SIZE);
+            if (!sockets[i].recv_buf) {
+                serial_write("[TCP] alloc_socket: kmalloc for recv_buf FAILED.\n");
+                kfree(sockets[i].send_buf);
+                sockets[i].used = 0;
+                return NULL;
+            }
+            serial_write("[TCP] alloc_socket: kmalloc for recv_buf OK.\n");
+            
+            serial_write("[TCP] alloc_socket: setting ca_state...\n");
+            sockets[i].ca_state = TCP_CA_SLOW_START;
+            serial_write("[TCP] alloc_socket: setting cwnd...\n");
+            sockets[i].cwnd = TCP_MSS;
+            serial_write("[TCP] alloc_socket: setting ssthresh...\n");
+            sockets[i].ssthresh = 65535;
+            serial_write("[TCP] alloc_socket: setting snd_wnd...\n");
+            sockets[i].snd_wnd = 65535;
+            serial_write("[TCP] alloc_socket: setting rto...\n");
+            sockets[i].rto = TCP_RTO_INITIAL;
+            
+            /* Initialize wait channels */
+            sockets[i].wait_accept = &sockets[i].wait_accept;
+            sockets[i].wait_recv = &sockets[i].wait_recv;
+            sockets[i].wait_send = &sockets[i].wait_send;
+
+            serial_write("[TCP] alloc_socket: all fields set.\n");
+
+            serial_write("[TCP] alloc_socket: returning new socket.\n");
             return &sockets[i];
         }
     }
+    serial_write("[TCP] alloc_socket: no free sockets.\n");
     return NULL;
 }
 
 static void free_socket_struct(tcp_socket_t *s) {
     if (!s) return;
     s->used = 0;
-    if (s->send_buf) free(s->send_buf);
-    if (s->recv_buf) free(s->recv_buf);
+    if (s->send_buf) kfree(s->send_buf);
+    if (s->recv_buf) kfree(s->recv_buf);
+    
     /* free queued tx/rx segments */
     tx_seg_t *t = s->tx_head;
     while (t) {
         tx_seg_t *n = t->next;
-        if (t->data) free(t->data);
-        free(t);
+        if (t->data) kfree(t->data);
+        kfree(t);
         t = n;
     }
     rx_seg_t *r = s->rx_head;
     while (r) {
         rx_seg_t *n = r->next;
-        if (r->data) free(r->data);
-        free(r);
+        if (r->data) kfree(r->data);
+        kfree(r);
         r = n;
+    }
+    
+    /* free RTT samples */
+    rtt_sample_t *rtt = s->rtt_samples;
+    while (rtt) {
+        rtt_sample_t *n = rtt->next;
+        kfree(rtt);
+        rtt = n;
     }
 }
 
@@ -182,53 +247,150 @@ struct __attribute__((packed)) tcp_header {
 #define TCP_ACK 0x10
 #define TCP_URG 0x20
 
-/* pseudo header for checksum omitted for brevity (assume no verification in host) */
+static void tcp_add_rtt_sample(tcp_socket_t *s, uint32_t seq) {
+    rtt_sample_t *sample = kmalloc(sizeof(rtt_sample_t));
+    if (!sample) return; 
+    
+    sample->seq = seq;
+    sample->ts_sent = kernel_uptime_ms();
+    sample->next = s->rtt_samples;
+    s->rtt_samples = sample;
+}
+
+static void tcp_update_rto(tcp_socket_t *s, uint32_t ack_seq) {
+    rtt_sample_t **pp = &s->rtt_samples;
+    while (*pp) {
+        rtt_sample_t *sample = *pp;
+        if (sample->seq <= ack_seq) {
+            uint64_t now = kernel_uptime_ms();
+            uint32_t rtt = (uint32_t)(now - sample->ts_sent);
+            
+            if (s->srtt == 0) {
+                /* First RTT measurement */
+                s->srtt = rtt;
+                s->rttvar = rtt / 2;
+            } else {
+                /* RFC 6298 algorithm */
+                uint32_t abs_diff = (rtt > s->srtt) ? (rtt - s->srtt) : (s->srtt - rtt);
+                s->rttvar = (3 * s->rttvar + abs_diff) / 4;
+                s->srtt = (7 * s->srtt + rtt) / 8;
+            }
+            
+            s->rto = s->srtt + (4 * s->rttvar);
+            if (s->rto < TCP_RTO_MIN) s->rto = TCP_RTO_MIN;
+            if (s->rto > TCP_RTO_MAX) s->rto = TCP_RTO_MAX;
+            
+            /* Remove this sample */
+            *pp = sample->next;
+            kfree(sample);
+        } else {
+            pp = &sample->next;
+        }
+    }
+}
+
+static void tcp_process_ack_congestion_control(tcp_socket_t *s, uint32_t ack, int is_duplicate) {
+    if (is_duplicate) {
+        s->duplicate_acks++;
+        if (s->duplicate_acks == 3 && s->ca_state != TCP_CA_FAST_RECOVERY) {
+            /* Fast retransmit */
+            s->ssthresh = s->cwnd / 2;
+            if (s->ssthresh < 2 * TCP_MSS) s->ssthresh = 2 * TCP_MSS;
+            s->cwnd = s->ssthresh + 3 * TCP_MSS;
+            s->ca_state = TCP_CA_FAST_RECOVERY;
+            kernel_log("tcp: entering fast recovery, cwnd=%u ssthresh=%u\n", s->cwnd, s->ssthresh);
+        } else if (s->ca_state == TCP_CA_FAST_RECOVERY) {
+            s->cwnd += TCP_MSS;
+        }
+    } else {
+        /* New ACK */
+        s->duplicate_acks = 0;
+        tcp_update_rto(s, ack);
+        
+        if (s->ca_state == TCP_CA_FAST_RECOVERY) {
+            s->cwnd = s->ssthresh;
+            s->ca_state = TCP_CA_CONGESTION_AVOIDANCE;
+        } else if (s->ca_state == TCP_CA_SLOW_START) {
+            s->cwnd += TCP_MSS;
+            if (s->cwnd >= s->ssthresh) {
+                s->ca_state = TCP_CA_CONGESTION_AVOIDANCE;
+            }
+        } else if (s->ca_state == TCP_CA_CONGESTION_AVOIDANCE) {
+            s->cwnd += (TCP_MSS * TCP_MSS) / s->cwnd;
+        }
+    }
+}
 
 /* create and queue a segment to transmit (adds TCP header) */
 static int tcp_queue_segment(tcp_socket_t *s, uint32_t seq, uint8_t flags, const void *payload, uint32_t plen) {
     /* build buffer: tcp header + payload */
     int hdrlen = sizeof(struct tcp_header);
-    uint8_t *buf = malloc(hdrlen + plen);
+    uint8_t *buf = kmalloc(hdrlen + plen);
     if (!buf) return -1;
     struct tcp_header *th = (struct tcp_header *)buf;
     th->src = htons(s->lport);
+    serial_write("[TCP] src, ");
     th->dst = htons(s->rport);
+    serial_write("dst, ");
     th->seq = htonl(seq);
+    serial_write("seq, ");
     th->ack = htonl(s->rcv_nxt);
+    serial_write("ack, ");
     th->off_reserved = (hdrlen/4)<<4;
+    serial_write("off_reserved, ");
     th->flags = flags | ((flags & TCP_ACK) ? TCP_ACK : 0);
-    th->window = htons(RECV_BUF_SIZE);
+    serial_write("flags \n");
+    
+    uint32_t recv_space = (s->recv_buf_head <= s->recv_buf_tail) ?
+        (RECV_BUF_SIZE - (s->recv_buf_tail - s->recv_buf_head)) :
+        (s->recv_buf_head - s->recv_buf_tail);
+    th->window = htons((uint16_t)(recv_space > 65535 ? 65535 : recv_space));
     th->checksum = 0;
     th->urgent = 0;
     if (plen && payload) memcpy(buf + hdrlen, payload, plen);
 
-    tx_seg_t *seg = malloc(sizeof(tx_seg_t));
-    if (!seg) { free(buf); return -1; }
+    tx_seg_t *seg = kmalloc(sizeof(tx_seg_t));
+    if (!seg) { kfree(buf); return -1; }
     seg->seq = seq;
     seg->len = hdrlen + plen;
     seg->data = buf;
     seg->ts_sent = 0;
-    seg->rto_ms = 1000; /* initial RTO 1s */
+    seg->rto_ms = s->rto;  // Use calculated RTO
     seg->retries = 0;
     seg->next = NULL;
-
+    serial_write("[TCP] tx tail\n");
     if (!s->tx_head) s->tx_head = s->tx_tail = seg;
     else {
         s->tx_tail->next = seg;
         s->tx_tail = seg;
     }
+    serial_write("[TCP] plen check\n");
+    if (plen > 0) {
+        tcp_add_rtt_sample(s, seq);
+    }
+    serial_write("[TCP] add rtt sample\n");
     return 0;
 }
 
-/* send queued segments (called by timer pass or immediately) */
 static void tcp_send_queued(tcp_socket_t *s) {
+    uint32_t in_flight = 0;
     tx_seg_t *t = s->tx_head;
+    
+    /* Calculate bytes in flight */
     while (t) {
+        if (t->ts_sent > 0) {
+            in_flight += t->len - sizeof(struct tcp_header);
+        }
+        t = t->next;
+    }
+    
+    /* Send new segments within congestion window */
+    t = s->tx_head;
+    while (t && in_flight < s->cwnd && in_flight < s->snd_wnd) {
         if (t->ts_sent == 0) {
-            /* send now */
-            /* For net_ipv4_send we need dst ip; use stored raddr */
             net_ipv4_send(s->raddr, 6, t->data, (int)t->len);
             t->ts_sent = kernel_uptime_ms();
+            in_flight += t->len - sizeof(struct tcp_header);
         }
         t = t->next;
     }
@@ -243,24 +405,44 @@ static void tcp_segment_from_sendbuf(tcp_socket_t *s) {
         uint32_t chunk = avail;
         if (chunk > TCP_MSS) chunk = TCP_MSS;
         if (chunk == 0) break;
-        uint8_t tmp[TCP_MSS];
-        memcpy(tmp, s->send_buf + s->send_buf_head, chunk);
-        s->send_buf_head = (s->send_buf_head + chunk) % SEND_BUF_SIZE;
-        tcp_queue_segment(s, s->snd_nxt, TCP_PSH | TCP_ACK, tmp, chunk);
-        s->snd_nxt += chunk;
+
+        uint8_t* tmp_payload = kmalloc(chunk);
+        if (!tmp_payload) {
+            break; /* out of memory */
+        }
+        memcpy(tmp_payload, s->send_buf + s->send_buf_head, chunk);
+
+        int ret = tcp_queue_segment(s, s->snd_nxt, TCP_PSH | TCP_ACK, tmp_payload, chunk);
+        kfree(tmp_payload);
+
+        if (ret == 0) {
+            s->send_buf_head = (s->send_buf_head + chunk) % SEND_BUF_SIZE;
+            s->snd_nxt += chunk;
+        } else {
+            break; /* failed to queue, will retry later */
+        }
     }
     tcp_send_queued(s);
 }
 
-/* Remove fully ACKed segments from retransmit queue */
 static void tcp_acknowledge(tcp_socket_t *s, uint32_t ack) {
+    uint32_t old_una = s->snd_una;
+    int is_duplicate = (ack == old_una);
+    
     while (s->tx_head && ( (s->tx_head->seq + s->tx_head->len - sizeof(struct tcp_header)) <= ack )) {
         tx_seg_t *t = s->tx_head;
         s->tx_head = t->next;
         if (!s->tx_head) s->tx_tail = NULL;
-        if (t->data) free(t->data);
-        free(t);
+        if (t->data) kfree(t->data);
+        kfree(t);
     }
+    
+    if (ack > s->snd_una) {
+        s->snd_una = ack;
+        is_duplicate = 0;
+    }
+    
+    tcp_process_ack_congestion_control(s, ack, is_duplicate);
 }
 
 /* insert rx segment into ordered rx queue */
@@ -270,10 +452,10 @@ static void rx_insert_ordered(tcp_socket_t *s, uint32_t seq, const uint8_t *data
     rx_seg_t **pp = &s->rx_head;
     while (*pp && (*pp)->seq < seq) pp = &(*pp)->next;
     if (*pp && (*pp)->seq == seq) return; /* duplicate */
-    rx_seg_t *r = malloc(sizeof(rx_seg_t));
+    rx_seg_t *r = kmalloc(sizeof(rx_seg_t));
     r->seq = seq;
     r->len = len;
-    r->data = malloc(len);
+    r->data = kmalloc(len);
     memcpy(r->data, data, len);
     r->next = *pp;
     *pp = r;
@@ -290,8 +472,8 @@ static void rx_insert_ordered(tcp_socket_t *s, uint32_t seq, const uint8_t *data
         memcpy(s->recv_buf + s->recv_buf_tail, m->data, copy_len);
         s->recv_buf_tail = (s->recv_buf_tail + copy_len) % RECV_BUF_SIZE;
         s->rcv_nxt += m->len;
-        free(m->data);
-        free(m);
+        kfree(m->data);
+        kfree(m);
     }
     /* wake up any readers */
     scheduler_wakeup(s->wait_recv);
@@ -299,6 +481,7 @@ static void rx_insert_ordered(tcp_socket_t *s, uint32_t seq, const uint8_t *data
 
 /* process incoming TCP packet */
 void tcp_input_ipv4(const uint8_t *ip_hdr, int ip_hdr_len, const uint8_t *tcp_pkt, int tcp_len) {
+    (void)ip_hdr_len;
     if (tcp_len < (int)sizeof(struct tcp_header)) return;
     const struct tcp_header *th = (const struct tcp_header *)tcp_pkt;
     uint16_t srcp = ntohs(th->src);
@@ -306,6 +489,7 @@ void tcp_input_ipv4(const uint8_t *ip_hdr, int ip_hdr_len, const uint8_t *tcp_pk
     uint32_t seq = ntohl(th->seq);
     uint32_t ack = ntohl(th->ack);
     uint8_t flags = th->flags;
+    uint16_t window = ntohs(th->window);  // Extract window size
     const uint8_t *payload = tcp_pkt + sizeof(*th);
     int payload_len = tcp_len - sizeof(*th);
 
@@ -339,6 +523,9 @@ void tcp_input_ipv4(const uint8_t *ip_hdr, int ip_hdr_len, const uint8_t *tcp_pk
         return;
     }
 
+    s->snd_wnd = window;
+    if (window > s->max_window) s->max_window = window;
+
     /* handle based on state */
     if (s->state == TCP_LISTEN && (flags & TCP_SYN)) {
         /* passive open: create new child socket for connection handshake */
@@ -348,11 +535,12 @@ void tcp_input_ipv4(const uint8_t *ip_hdr, int ip_hdr_len, const uint8_t *tcp_pk
         child->lport = s->lport;
         memcpy(child->raddr, ip_hdr + 12, 4);
         child->rport = srcp;
-        child->iss = (uint32_t)(rand() & 0xffff);
+        child->iss = (uint32_t)(kernel_uptime_ms() & 0xffff);
         child->snd_una = child->iss;
         child->snd_nxt = child->iss + 1;
         child->rcv_nxt = seq + 1;
         child->state = TCP_SYN_RECEIVED;
+        child->snd_wnd = window;  // Initialize peer window
 
         /* enqueue into parent's accept backlog */
         if (s->pending_count < s->backlog) {
@@ -375,6 +563,7 @@ void tcp_input_ipv4(const uint8_t *ip_hdr, int ip_hdr_len, const uint8_t *tcp_pk
         /* advance connection */
         if (s->state == TCP_SYN_SENT && ack > s->iss) {
             s->state = TCP_ESTABLISHED;
+            s->snd_wnd = window;  // Set initial window
             scheduler_wakeup(s->wait_send);
         } else if (s->state == TCP_SYN_RECEIVED && ack >= s->snd_nxt) {
             s->state = TCP_ESTABLISHED;
@@ -413,10 +602,13 @@ void tcp_input_ipv4(const uint8_t *ip_hdr, int ip_hdr_len, const uint8_t *tcp_pk
     }
 }
 
-/* periodic timer invoked (registered by tcp_init) */
 static void tcp_timer_fn(void) {
     uint64_t now = kernel_uptime_ms();
-    for (tcp_socket_t *s = conn_list; s; s = s->next) {
+    tcp_socket_t *s = conn_list;
+    
+    while (s) {
+        tcp_socket_t *next = s->next;  /* save next before potential removal */
+        
         /* retransmission handling */
         tx_seg_t *t = s->tx_head;
         while (t) {
@@ -434,31 +626,48 @@ static void tcp_timer_fn(void) {
                 t->ts_sent = now;
                 t->retries++;
                 t->rto_ms *= 2; /* exponential backoff */
+                if (t->rto_ms > TCP_RTO_MAX) t->rto_ms = TCP_RTO_MAX;
+                
+                s->ssthresh = s->cwnd / 2;
+                if (s->ssthresh < 2 * TCP_MSS) s->ssthresh = 2 * TCP_MSS;
+                s->cwnd = TCP_MSS;
+                s->ca_state = TCP_CA_SLOW_START;
+                s->duplicate_acks = 0;
             }
             t = t->next;
         }
 
-        /* send new data if any */
-        if (s->state == TCP_ESTABLISHED) {
-            tcp_segment_from_sendbuf(s);
-        }
+        if (s->used) {  /* check if socket still exists after potential removal */
+            /* send new data if any */
+            if (s->state == TCP_ESTABLISHED) {
+                tcp_segment_from_sendbuf(s);
+            }
 
-        /* TIME_WAIT expiry handling */
-        if (s->state == TCP_TIME_WAIT && now >= s->timewait_expires) {
-            s->state = TCP_CLOSED;
-            conn_list_remove(s);
-            free_socket_struct(s);
+            /* TIME_WAIT expiry handling */
+            if (s->state == TCP_TIME_WAIT && now >= s->timewait_expires) {
+                s->state = TCP_CLOSED;
+                conn_list_remove(s);
+                free_socket_struct(s);
+            }
         }
+        
+        s = next;
     }
 }
 
 /* socket API: map to simple fd (index) */
 int sock_socket(void) {
+    serial_write("[TCP] sock_socket: entered\n");
     tcp_socket_t *s = alloc_socket();
-    if (!s) return -1;
+    if (!s) {
+        serial_write("[TCP] sock_socket: alloc_socket failed.\n");
+        return -1;
+    }
+    serial_write("[TCP] sock_socket: alloc_socket OK.\n");
     /* default local wildcard; caller must bind */
     s->state = TCP_CLOSED;
     conn_list_add(s);
+    serial_write("[TCP] sock_socket: returning socket descriptor.\n");
     return (int)(s - sockets);
 }
 
@@ -501,17 +710,27 @@ int sock_connect(int sd, const uint8_t ip[4], uint16_t port) {
     if (sd < 0 || sd >= MAX_SOCKETS) return -1;
     tcp_socket_t *s = &sockets[sd];
     if (!s->used) return -1;
+    if (!ip) {
+        return -1;
+    }
     memcpy(s->raddr, ip, 4);
     s->rport = port;
-    if (s->lport == 0) s->lport = (uint16_t)(1024 + (rand() % 40000));
-    s->iss = (uint32_t)(rand() & 0xffff);
+    if (s->lport == 0) s->lport = (uint16_t)(1024 + (kernel_uptime_ms() % 40000));
+    s->iss = (uint32_t)(kernel_uptime_ms() & 0xffff);
+    serial_write("[TCP] sock_connect: iss OK, ");
     s->snd_una = s->iss;
+    serial_write("snd_una OK, ");
     s->snd_nxt = s->iss + 1;
+    serial_write("snd_nxt OK, ");
     s->rcv_nxt = 0;
+    serial_write("rcv_nxt OK");
     s->state = TCP_SYN_SENT;
     /* send SYN */
+    serial_write("[TCP] sock_connect: sending SYN\n");
     tcp_queue_segment(s, s->iss, TCP_SYN, NULL, 0);
+    serial_write("[TCP] sock_connect: queued SYN\n");
     tcp_send_queued(s);
+    serial_write("[TCP] sock_connect: sent SYN\n");
     /* block until established or timeout (simplified) */
     uint64_t start = kernel_uptime_ms();
     while (s->state != TCP_ESTABLISHED) {
@@ -633,12 +852,12 @@ int sock_poll(int *fds, int nfds, int *events_out, int timeout_ms) {
     }
 }
 
-void netstat_dump(void) {
+void tcp_dump_pcbs(void) {
     kernel_log("Active TCP connections:\n");
     for (tcp_socket_t *s = conn_list; s; s = s->next) {
         if (!s->used) continue;
-        kernel_log("lport=%u rport=%u state=%d send_unacked=%u recv_next=%u\n",
-            s->lport, s->rport, s->state, s->snd_una, s->rcv_nxt);
+        kernel_log("lport=%u rport=%u state=%d cwnd=%u ssthresh=%u rto=%u\n",
+            s->lport, s->rport, s->state, s->cwnd, s->ssthresh, s->rto);
     }
 }
 

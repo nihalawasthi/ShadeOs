@@ -9,4 +9,4 @@ int pkg_remove(const char* name);
 void pkg_list();
 void pkg_info(const char* name);
 
-#endif 
+#endif

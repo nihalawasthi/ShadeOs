@@ -16,4 +16,4 @@ typedef struct blockdev {
 void blockdev_init();
 blockdev_t* blockdev_get(int id);
 
-#endif 
+#endif

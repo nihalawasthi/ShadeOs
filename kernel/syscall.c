@@ -51,4 +51,4 @@ static int syscall_getpid() {
     return -1;
     }
 
-// Assembly stub for int 0x80 will be set up in IDT 
+// Assembly stub for int 0x80 will be set up in IDT

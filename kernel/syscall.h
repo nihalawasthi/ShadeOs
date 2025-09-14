@@ -31,4 +31,4 @@ static inline int sys_getpid() {
     return pid;
 }
 
-#endif 
+#endif

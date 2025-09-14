@@ -3,17 +3,29 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include "net.h"
 
-int sock_socket(void);
-int sock_bind(int s, const uint8_t ip[4], uint16_t port);
-int sock_listen(int s, int backlog);
-int sock_accept(int s, uint8_t out_ip[4], uint16_t *out_port);
-int sock_connect(int s, const uint8_t ip[4], uint16_t port);
-ssize_t sock_send(int s, const void *buf, size_t len);
-ssize_t sock_recv(int s, void *buf, size_t len);
-int sock_close(int s);
-int sock_set_nonblock(int s, int nonblock);
-int sock_poll(int *fds, int nfds, int *events_out, int timeout_ms);
+/* POSIX compliance */
+typedef long ssize_t;
+
+#define AF_INET 2
+#define SOCK_STREAM 1
+#define SOCK_DGRAM 2
+
+/* Poll events */
+#define POLLIN  0x0001
+#define POLLOUT 0x0004
+
+int socket_open(int domain, int type, int protocol);
+int socket_bind(int sock, uint16_t port);
+int socket_connect(int sock, struct ip_addr dest, uint16_t port);
+int socket_listen(int sock, int backlog);
+int socket_accept(int sock);
+int socket_send(int sock, const void *buf, int len);
+int socket_recv(int sock, void *buf, int maxlen);
+int socket_close(int sock);
+int socket_set_blocking(int sock, int blocking);
+int socket_poll(int sock, int events, int timeout_ms);
 void netstat_dump(void);
 
 #endif /* KERNEL_SOCKET_H */

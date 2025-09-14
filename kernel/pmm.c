@@ -154,4 +154,4 @@ uint64_t pmm_total_memory() {
 
 uint64_t pmm_free_memory() {
     return free_pages * PAGE_SIZE;
-} 
+}

@@ -86,4 +86,4 @@ void parse_multiboot2_memory_map(uint64_t mb2_info_ptr) {
         tag = (mb2_tag_t*)(((uintptr_t)((uint8_t*)tag + tag->size + MULTIBOOT2_TAG_ALIGN - 1)) & ~(uintptr_t)(MULTIBOOT2_TAG_ALIGN - 1));
     }
     serial_write("[DEBUG] parse_multiboot2_memory_map: done\n");
-} 
+}

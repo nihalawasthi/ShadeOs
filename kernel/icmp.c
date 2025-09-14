@@ -1,9 +1,8 @@
 #include "icmp.h"
 #include "endian.h"
 #include "net.h"
-#include <string.h>
 #include <stdint.h>
-#include <stdlib.h>
+#include "heap.h"
 
 /* External helper provided by net.c */
 extern int net_ipv4_send(const uint8_t dst_ip[4], uint8_t proto, const void *payload, int payload_len);
@@ -41,7 +40,7 @@ void icmp_handle_ipv4(const uint8_t src_ip[4], const uint8_t *icmp_payload, int 
     const struct icmp_hdr *ih = (const struct icmp_hdr *)icmp_payload;
     if (ih->type == 8) { /* Echo request */
         int total_len = icmp_len;
-        uint8_t *reply = (uint8_t *)malloc(total_len);
+        uint8_t *reply = (uint8_t *)kmalloc(total_len);
         if (!reply) return;
         memcpy(reply, icmp_payload, total_len);
         struct icmp_hdr *rh = (struct icmp_hdr *)reply;
@@ -49,7 +48,7 @@ void icmp_handle_ipv4(const uint8_t src_ip[4], const uint8_t *icmp_payload, int 
         rh->checksum = 0;
         rh->checksum = ip_checksum_local(reply, total_len);
         net_ipv4_send(src_ip, 1 /* ICMP */, reply, total_len);
-        free(reply);
+        kfree(reply);
     } else if (ih->type == 0) {
         /* echo reply received: could signal to a waiting socket/consumer */
     }
@@ -57,7 +56,7 @@ void icmp_handle_ipv4(const uint8_t src_ip[4], const uint8_t *icmp_payload, int 
 
 int icmp_send_echo_request(const uint8_t dst_ip[4], uint16_t id, uint16_t seq, const void *data, int dlen) {
     int icmp_len = (int)sizeof(struct icmp_hdr) + dlen;
-    uint8_t *buf = (uint8_t*)malloc(icmp_len);
+    uint8_t *buf = (uint8_t*)kmalloc(icmp_len);
     if (!buf) return -1;
     struct icmp_hdr *ih = (struct icmp_hdr *)buf;
     ih->type = 8;
@@ -68,6 +67,6 @@ int icmp_send_echo_request(const uint8_t dst_ip[4], uint16_t id, uint16_t seq, c
     if (dlen && data) memcpy(buf + sizeof(*ih), data, dlen);
     ih->checksum = ip_checksum_local(buf, icmp_len);
     int ret = net_ipv4_send(dst_ip, 1 /* ICMP */, buf, icmp_len);
-    free(buf);
+    kfree(buf);
     return ret;
 }

@@ -39,10 +39,10 @@ You will need the following tools to build and run ShadeOS:
 ### Building from Source
 
 1.  **Clone the repository:**
-    ```sh
+    \`\`\`sh
     git clone https://github.com/nihalawasthi/ShadeOs.git
     cd ShadeOs
-    ```
+    \`\`\`
 
 2.  **Build the project:**
 
@@ -51,16 +51,16 @@ You will need the following tools to build and run ShadeOS:
     **A) Convenience Script (for Arch Linux)**
 
     For users on an Arch-based distribution, a convenience script is provided. It will automatically install all required dependencies and then build the project.
-    ```sh
+    \`\`\`sh
     ./install.sh
-    ```
+    \`\`\`
 
     **B) Manual Build (All Systems)**
 
     On any other system, ensure you have all the [Prerequisites](#prerequisites) installed first. Then, run the following command to build the project:
-    ```sh
+    \`\`\`sh
     make
-    ```
+    \`\`\`
     Both methods will compile the C and Rust code and create a bootable `ShadeOS.iso` image in the `bin/` directory.
 
 ### Running the OS
@@ -68,9 +68,9 @@ You will need the following tools to build and run ShadeOS:
 After a successful build, you can run ShadeOS in an emulator or a virtual machine.
 
 *   **Using the QEMU Script:** The easiest way to test the OS is with the provided script, which launches QEMU with the correct settings:
-    ```sh
+    \`\`\`sh
     ./run.sh
-    ```
+    \`\`\`
 *   **Using another Virtual Machine:** Alternatively, you can take the generated `bin/ShadeOS.iso` file and boot it in any standard virtual machine software like VMware or VirtualBox.
 
 ## 💿 Downloads
