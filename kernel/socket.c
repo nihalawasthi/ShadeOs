@@ -41,19 +41,19 @@ int socket_open(int domain, int type, int protocol) {
         }
         serial_write("[SOCKET] socket_open: setting fields...\r\n");
         socks[i].in_use=1;
-        serial_write("1\n");
+        serial_write("1 ");
         socks[i].domain=domain;
-        serial_write("2\n");
+        serial_write("2 ");
         socks[i].type=type;
-        serial_write("3\n");
+        serial_write("3 ");
         socks[i].protocol=protocol;
-        serial_write("4\n");
+        serial_write("4 ");
         socks[i].blocking=1;
-        serial_write("5\n");
+        serial_write("5 ");
         socks[i].lport=0;
-        serial_write("6\n");
+        serial_write("6 ");
         memset(&socks[i].rip,0,sizeof(socks[i].rip));
-        serial_write("7\n");
+        serial_write("7 ");
         socks[i].rport=0;
         serial_write("8\n");
         return i+1;

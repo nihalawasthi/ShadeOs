@@ -55,6 +55,8 @@ typedef struct rx_seg {
 #define MAX_SOCKETS 256
 #define SEND_BUF_SIZE (64*1024)
 #define RECV_BUF_SIZE (65535)
+#define TCP_MSS 1460
+#define TCP_RETRANSMIT_MAX 5
 
 typedef struct tcp_socket {
     int used;
@@ -323,52 +325,188 @@ static void tcp_process_ack_congestion_control(tcp_socket_t *s, uint32_t ack, in
 
 /* create and queue a segment to transmit (adds TCP header) */
 static int tcp_queue_segment(tcp_socket_t *s, uint32_t seq, uint8_t flags, const void *payload, uint32_t plen) {
+    if (!s) {
+        serial_write("[TCP] ERROR: NULL socket\n");
+        return -1;
+    }
+    
+    if (!s->used) {
+        serial_write("[TCP] ERROR: Socket not in use\n");
+        return -1;
+    }
+    
+    if (plen > TCP_MSS) {
+        serial_write("[TCP] ERROR: Payload too large\n");
+        return -1;
+    }
+    
+    serial_write("[TCP] tcp_queue_segment: starting\n");
+    
+    if (s->lport == 0 || s->rport == 0) {
+        serial_write("[TCP] ERROR: Invalid port configuration\n");
+        return -1;
+    }
+    
     /* build buffer: tcp header + payload */
     int hdrlen = sizeof(struct tcp_header);
-    uint8_t *buf = kmalloc(hdrlen + plen);
-    if (!buf) return -1;
-    struct tcp_header *th = (struct tcp_header *)buf;
-    th->src = htons(s->lport);
-    serial_write("[TCP] src, ");
-    th->dst = htons(s->rport);
-    serial_write("dst, ");
-    th->seq = htonl(seq);
-    serial_write("seq, ");
-    th->ack = htonl(s->rcv_nxt);
-    serial_write("ack, ");
-    th->off_reserved = (hdrlen/4)<<4;
-    serial_write("off_reserved, ");
-    th->flags = flags | ((flags & TCP_ACK) ? TCP_ACK : 0);
-    serial_write("flags \n");
+    serial_write("[TCP] tcp_queue_segment: allocating buffer\n");
     
+    uint8_t *buf = kmalloc(hdrlen + plen + 8); // Add padding for safety
+    if (!buf) {
+        serial_write("[TCP] ERROR: kmalloc failed\n");
+        return -1;
+    }
+    
+    memset(buf, 0, hdrlen + plen + 8);
+    serial_write("[TCP] tcp_queue_segment: buffer allocated and cleared\n");
+    
+    if ((uintptr_t)buf % 4 != 0) {
+        serial_write("[TCP] WARNING: Buffer not aligned\n");
+    }
+    
+    serial_write("[TCP] tcp_queue_segment: creating header\n");
+    struct tcp_header *th = (struct tcp_header *)buf;
+    
+    serial_write("[TCP] tcp_queue_segment: setting src port\n");
+    th->src = htons(s->lport);
+    
+    serial_write("[TCP] tcp_queue_segment: setting dst port\n");
+    th->dst = htons(s->rport);
+    
+    serial_write("[TCP] tcp_queue_segment: setting sequence\n");
+    th->seq = htonl(seq);
+    
+    serial_write("[TCP] tcp_queue_segment: setting ack\n");
+    th->ack = htonl(s->rcv_nxt);
+    
+    serial_write("[TCP] tcp_queue_segment: setting offset\n");
+    th->off_reserved = (hdrlen/4)<<4;
+    
+    serial_write("[TCP] tcp_queue_segment: setting flags\n");
+    th->flags = flags | ((flags & TCP_ACK) ? TCP_ACK : 0);
+    
+    serial_write("[TCP] tcp_queue_segment: calculating window\n");
     uint32_t recv_space = (s->recv_buf_head <= s->recv_buf_tail) ?
         (RECV_BUF_SIZE - (s->recv_buf_tail - s->recv_buf_head)) :
         (s->recv_buf_head - s->recv_buf_tail);
+    
+    serial_write("[TCP] tcp_queue_segment: setting window\n");
     th->window = htons((uint16_t)(recv_space > 65535 ? 65535 : recv_space));
+    
+    serial_write("[TCP] tcp_queue_segment: setting checksum and urgent\n");
     th->checksum = 0;
     th->urgent = 0;
-    if (plen && payload) memcpy(buf + hdrlen, payload, plen);
-
-    tx_seg_t *seg = kmalloc(sizeof(tx_seg_t));
-    if (!seg) { kfree(buf); return -1; }
-    seg->seq = seq;
-    seg->len = hdrlen + plen;
-    seg->data = buf;
-    seg->ts_sent = 0;
-    seg->rto_ms = s->rto;  // Use calculated RTO
-    seg->retries = 0;
-    seg->next = NULL;
-    serial_write("[TCP] tx tail\n");
-    if (!s->tx_head) s->tx_head = s->tx_tail = seg;
-    else {
-        s->tx_tail->next = seg;
-        s->tx_tail = seg;
+    
+    if (plen && payload) {
+        serial_write("[TCP] tcp_queue_segment: copying payload\n");
+        memcpy(buf + hdrlen, payload, plen);
     }
-    serial_write("[TCP] plen check\n");
+
+    serial_write("[TCP] tcp_queue_segment: header filled successfully\n");
+    
+    serial_write("[TCP] tcp_queue_segment: allocating segment struct\n");
+    tx_seg_t *seg = kmalloc(sizeof(tx_seg_t));
+    if (!seg) { 
+        serial_write("[TCP] ERROR: segment struct allocation failed\n");
+        kfree(buf); 
+        return -1; 
+    }
+    
+    memset(seg, 0, sizeof(tx_seg_t));
+    serial_write("[TCP] tcp_queue_segment: segment struct created\n");
+    
+    serial_write("[TCP] tcp_queue_segment: setting seg->seq\n");
+    seg->seq = seq;
+    
+    serial_write("[TCP] tcp_queue_segment: setting seg->len\n");
+    seg->len = hdrlen + plen;
+    
+    serial_write("[TCP] tcp_queue_segment: setting seg->data\n");
+    seg->data = buf;
+    
+    serial_write("[TCP] tcp_queue_segment: setting seg->ts_sent\n");
+    seg->ts_sent = 0;
+    
+    serial_write("[TCP] tcp_queue_segment: validating socket rto field\n");
+    if ((uintptr_t)&s->rto < 0x1000 || (uintptr_t)&s->rto > 0x7FFFFFFF) {
+        serial_write("[TCP] ERROR: Invalid socket rto field address\n");
+        kfree(seg->data);
+        kfree(seg);
+        return -1;
+    }
+    
+    serial_write("[TCP] tcp_queue_segment: setting seg->rto_ms\n");
+    seg->rto_ms = s->rto;
+    
+    serial_write("[TCP] tcp_queue_segment: setting seg->retries\n");
+    seg->retries = 0;
+    
+    serial_write("[TCP] tcp_queue_segment: setting seg->next\n");
+    seg->next = NULL;
+    
+    serial_write("[TCP] tcp_queue_segment: all segment fields set\n");
+    
+    serial_write("[TCP] tcp_queue_segment: checking queue state\n");
+    
+    // Validate socket structure integrity before queue manipulation
+    if ((uintptr_t)s < 0x1000 || (uintptr_t)s > 0x7FFFFFFF) {
+        serial_write("[TCP] ERROR: Invalid socket pointer\n");
+        kfree(seg->data);
+        kfree(seg);
+        return -1;
+    }
+    
+    serial_write("[TCP] tcp_queue_segment: socket pointer valid\n");
+    
+    // Check tx_head pointer validity
+    serial_write_hex("[TCP] tx_head address: ", (uintptr_t)&s->tx_head);
+    serial_write_hex("[TCP] tx_head value: ", (uintptr_t)s->tx_head);
+    
+    // Check tx_tail pointer validity  
+    serial_write_hex("[TCP] tx_tail address: ", (uintptr_t)&s->tx_tail);
+    serial_write_hex("[TCP] tx_tail value: ", (uintptr_t)s->tx_tail);
+    
+    serial_write("[TCP] tcp_queue_segment: about to check tx_head == NULL\n");
+    
+    // This is where the crash likely occurs - let's be very careful
+    volatile tx_seg_t *volatile_tx_head = s->tx_head;
+    serial_write("[TCP] tcp_queue_segment: loaded tx_head into volatile\n");
+    
+    if (volatile_tx_head == NULL) {
+        serial_write("[TCP] tcp_queue_segment: tx_head is NULL, setting both pointers\n");
+        s->tx_head = seg;
+        serial_write("[TCP] tcp_queue_segment: set tx_head\n");
+        s->tx_tail = seg;
+        serial_write("[TCP] tcp_queue_segment: set tx_tail\n");
+        serial_write("[TCP] tcp_queue_segment: added to empty queue\n");
+    } else {
+        serial_write("[TCP] tcp_queue_segment: tx_head is not NULL\n");
+        
+        // Check tx_tail validity before using it
+        volatile tx_seg_t *volatile_tx_tail = s->tx_tail;
+        serial_write("[TCP] tcp_queue_segment: loaded tx_tail into volatile\n");
+        
+        if (volatile_tx_tail == NULL) {
+            serial_write("[TCP] ERROR: Inconsistent queue state\n");
+            kfree(seg->data);
+            kfree(seg);
+            return -1;
+        }
+        
+        serial_write("[TCP] tcp_queue_segment: about to set tx_tail->next\n");
+        s->tx_tail->next = seg;
+        serial_write("[TCP] tcp_queue_segment: set tx_tail->next\n");
+        s->tx_tail = seg;
+        serial_write("[TCP] tcp_queue_segment: updated tx_tail\n");
+        serial_write("[TCP] tcp_queue_segment: added to queue tail\n");
+    }
+    
     if (plen > 0) {
+        serial_write("[TCP] tcp_queue_segment: adding RTT sample\n");
         tcp_add_rtt_sample(s, seq);
     }
-    serial_write("[TCP] add rtt sample\n");
+    
+    serial_write("[TCP] tcp_queue_segment: completed successfully\n");
     return 0;
 }
 
@@ -400,7 +538,7 @@ static void tcp_send_queued(tcp_socket_t *s) {
 static void tcp_segment_from_sendbuf(tcp_socket_t *s) {
     while (s->send_buf_head != s->send_buf_tail) {
         uint32_t avail = (s->send_buf_head <= s->send_buf_tail) ? 
-            (s->send_buf_tail - s->send_buf_head) :
+            (SEND_BUF_SIZE - s->send_buf_tail) :
             (SEND_BUF_SIZE - s->send_buf_head);
         uint32_t chunk = avail;
         if (chunk > TCP_MSS) chunk = TCP_MSS;
@@ -466,7 +604,7 @@ static void rx_insert_ordered(tcp_socket_t *s, uint32_t seq, const uint8_t *data
         s->rx_head = m->next;
         /* copy into user recv_buf */
         uint32_t free_space = (s->recv_buf_head <= s->recv_buf_tail) ?
-            (RECV_BUF_SIZE - s->recv_buf_tail) : (s->recv_buf_head - s->recv_buf_tail - 1);
+            (RECV_BUF_SIZE - s->recv_buf_tail) : (RECV_BUF_SIZE - s->recv_buf_head - 1);
         uint32_t copy_len = m->len;
         if (copy_len > free_space) copy_len = free_space;
         memcpy(s->recv_buf + s->recv_buf_tail, m->data, copy_len);
@@ -483,34 +621,47 @@ static void rx_insert_ordered(tcp_socket_t *s, uint32_t seq, const uint8_t *data
 void tcp_input_ipv4(const uint8_t *ip_hdr, int ip_hdr_len, const uint8_t *tcp_pkt, int tcp_len) {
     (void)ip_hdr_len;
     if (tcp_len < (int)sizeof(struct tcp_header)) return;
+    
     const struct tcp_header *th = (const struct tcp_header *)tcp_pkt;
     uint16_t srcp = ntohs(th->src);
     uint16_t dstp = ntohs(th->dst);
     uint32_t seq = ntohl(th->seq);
     uint32_t ack = ntohl(th->ack);
     uint8_t flags = th->flags;
-    uint16_t window = ntohs(th->window);  // Extract window size
+    uint16_t window = ntohs(th->window);
     const uint8_t *payload = tcp_pkt + sizeof(*th);
     int payload_len = tcp_len - sizeof(*th);
 
-    /* find socket matching 4-tuple (simplified single match) */
+    serial_write("[TCP] tcp_input_ipv4: received packet from port ");
+    serial_write_dec("", srcp);
+    serial_write_dec(" to port ", dstp);
+    serial_write_hex(" flags=", flags);
+    serial_write("\n");
+
+    /* find socket matching 4-tuple */
     tcp_socket_t *s = NULL;
     for (tcp_socket_t *c = conn_list; c; c = c->next) {
         if (!c->used) continue;
         if (c->lport == dstp) {
-            /* if local ip is wildcard or matches */
+            /* Check for listening socket or established connection */
             if ((c->rport == 0 && (flags & TCP_SYN) && c->state == TCP_LISTEN) ||
                 (memcmp(c->raddr, ip_hdr + 12, 4) == 0 && c->rport == srcp)) {
-                s = c; break;
+                s = c; 
+                serial_write("[TCP] Found matching socket in state ");
+                serial_write_dec("", s->state);
+                serial_write("\n");
+                break;
             }
         }
     }
 
     if (!s) {
+        serial_write("[TCP] No matching socket found, sending RST\n");
         /* No socket - send RST in response to SYN/any other non-RST */
         if (!(flags & TCP_RST)) {
             uint8_t rst_buf[sizeof(struct tcp_header)];
             struct tcp_header *rth = (struct tcp_header *)rst_buf;
+            memset(rst_buf, 0, sizeof(rst_buf));
             rth->src = htons(dstp);
             rth->dst = htons(srcp);
             rth->seq = htonl(0);
@@ -518,6 +669,7 @@ void tcp_input_ipv4(const uint8_t *ip_hdr, int ip_hdr_len, const uint8_t *tcp_pk
             rth->off_reserved = (sizeof(struct tcp_header)/4)<<4;
             rth->flags = TCP_RST | TCP_ACK;
             rth->window = 0;
+            rth->checksum = 0;
             net_ipv4_send((uint8_t *)(ip_hdr+12), 6, rst_buf, sizeof(rst_buf));
         }
         return;
@@ -526,11 +678,15 @@ void tcp_input_ipv4(const uint8_t *ip_hdr, int ip_hdr_len, const uint8_t *tcp_pk
     s->snd_wnd = window;
     if (window > s->max_window) s->max_window = window;
 
-    /* handle based on state */
+    /* Handle based on state */
     if (s->state == TCP_LISTEN && (flags & TCP_SYN)) {
+        serial_write("[TCP] Handling SYN in LISTEN state\n");
         /* passive open: create new child socket for connection handshake */
         tcp_socket_t *child = alloc_socket();
-        if (!child) { kernel_log("tcp: cannot allocate child for incoming connection\n"); return; }
+        if (!child) { 
+            serial_write("[TCP] ERROR: cannot allocate child for incoming connection\n"); 
+            return; 
+        }
         memcpy(child->laddr, s->laddr, 4);
         child->lport = s->lport;
         memcpy(child->raddr, ip_hdr + 12, 4);
@@ -540,7 +696,7 @@ void tcp_input_ipv4(const uint8_t *ip_hdr, int ip_hdr_len, const uint8_t *tcp_pk
         child->snd_nxt = child->iss + 1;
         child->rcv_nxt = seq + 1;
         child->state = TCP_SYN_RECEIVED;
-        child->snd_wnd = window;  // Initialize peer window
+        child->snd_wnd = window;
 
         /* enqueue into parent's accept backlog */
         if (s->pending_count < s->backlog) {
@@ -550,24 +706,49 @@ void tcp_input_ipv4(const uint8_t *ip_hdr, int ip_hdr_len, const uint8_t *tcp_pk
             tcp_queue_segment(child, child->iss, TCP_SYN | TCP_ACK, NULL, 0);
             tcp_send_queued(child);
             scheduler_wakeup(s->wait_accept);
+            serial_write("[TCP] Sent SYN+ACK response\n");
         } else {
             /* backlog full: drop / ignore */
             free_socket_struct(child);
+            serial_write("[TCP] Accept backlog full, dropping connection\n");
         }
         return;
     }
 
-    /* For other states, simple ACK/FIN/PSH handling */
-    if (flags & TCP_ACK) {
-        tcp_acknowledge(s, ack);
-        /* advance connection */
-        if (s->state == TCP_SYN_SENT && ack > s->iss) {
+    /* Handle SYN-ACK response for outgoing connections */
+    if (s->state == TCP_SYN_SENT && (flags & (TCP_SYN | TCP_ACK)) == (TCP_SYN | TCP_ACK)) {
+        serial_write("[TCP] Received SYN-ACK in SYN_SENT state\n");
+        if (ack == s->snd_nxt) {
+            s->rcv_nxt = seq + 1;
+            s->snd_una = ack;
             s->state = TCP_ESTABLISHED;
-            s->snd_wnd = window;  // Set initial window
+            s->snd_wnd = window;
+            
+            /* Send ACK to complete handshake */
+            tcp_queue_segment(s, s->snd_nxt, TCP_ACK, NULL, 0);
+            tcp_send_queued(s);
+            
             scheduler_wakeup(s->wait_send);
-        } else if (s->state == TCP_SYN_RECEIVED && ack >= s->snd_nxt) {
+            serial_write("[TCP] Connection established, sent final ACK\n");
+        } else {
+            serial_write("[TCP] Invalid ACK number in SYN-ACK\n");
+        }
+        return;
+    }
+
+    /* For other states, handle ACK/FIN/PSH */
+    if (flags & TCP_ACK) {
+        serial_write("[TCP] Processing ACK in state ");
+        serial_write_dec("", s->state);
+        serial_write("\n");
+        
+        tcp_acknowledge(s, ack);
+        
+        /* advance connection state */
+        if (s->state == TCP_SYN_RECEIVED && ack >= s->snd_nxt) {
             s->state = TCP_ESTABLISHED;
             scheduler_wakeup(s->wait_accept);
+            serial_write("[TCP] Connection established from SYN_RECEIVED\n");
         } else if (s->state == TCP_FIN_WAIT_1) {
             s->state = TCP_FIN_WAIT_2;
         } else if (s->state == TCP_LAST_ACK) {
@@ -579,79 +760,45 @@ void tcp_input_ipv4(const uint8_t *ip_hdr, int ip_hdr_len, const uint8_t *tcp_pk
         }
     }
 
-    if (payload_len > 0) {
-        /* deliver / reassemble */
+    /* Handle data payload */
+    if (payload_len > 0 && (s->state == TCP_ESTABLISHED || s->state == TCP_FIN_WAIT_1 || s->state == TCP_FIN_WAIT_2)) {
+        serial_write("[TCP] Received ");
+        serial_write_dec("", payload_len);
+        serial_write(" bytes of data\n");
+        
         rx_insert_ordered(s, seq, payload, payload_len);
-        /* send ACK */
+
+        /* Send ACK for received data */
         tcp_queue_segment(s, s->snd_nxt, TCP_ACK, NULL, 0);
         tcp_send_queued(s);
     }
 
+    /* Handle FIN */
     if (flags & TCP_FIN) {
-        s->rcv_nxt += 1;
-        /* respond with ACK */
-        tcp_queue_segment(s, s->snd_nxt, TCP_ACK, NULL, 0);
-        tcp_send_queued(s);
+        serial_write("[TCP] Received FIN\n");
+        s->rcv_nxt++;
         if (s->state == TCP_ESTABLISHED) {
             s->state = TCP_CLOSE_WAIT;
-            scheduler_wakeup(s->wait_recv);
-        } else if (s->state == TCP_FIN_WAIT_1) {
-            s->state = TCP_TIME_WAIT;
-            s->timewait_expires = kernel_uptime_ms() + 2*60*1000; /* 2 minutes TIME_WAIT */
+            /* Send ACK for FIN */
+            tcp_queue_segment(s, s->snd_nxt, TCP_ACK, NULL, 0);
+            tcp_send_queued(s);
         }
     }
 }
 
-static void tcp_timer_fn(void) {
-    uint64_t now = kernel_uptime_ms();
-    tcp_socket_t *s = conn_list;
-    
-    while (s) {
-        tcp_socket_t *next = s->next;  /* save next before potential removal */
-        
-        /* retransmission handling */
-        tx_seg_t *t = s->tx_head;
-        while (t) {
-            if (t->ts_sent && now - t->ts_sent >= t->rto_ms) {
-                if (t->retries >= TCP_RETRANSMIT_MAX) {
-                    /* abort connection */
-                    kernel_log("tcp: aborting connection due to retransmit max\n");
-                    s->state = TCP_CLOSED;
-                    conn_list_remove(s);
-                    free_socket_struct(s);
-                    break;
-                }
-                /* retransmit */
-                net_ipv4_send(s->raddr, 6, t->data, (int)t->len);
-                t->ts_sent = now;
-                t->retries++;
-                t->rto_ms *= 2; /* exponential backoff */
-                if (t->rto_ms > TCP_RTO_MAX) t->rto_ms = TCP_RTO_MAX;
-                
-                s->ssthresh = s->cwnd / 2;
-                if (s->ssthresh < 2 * TCP_MSS) s->ssthresh = 2 * TCP_MSS;
-                s->cwnd = TCP_MSS;
-                s->ca_state = TCP_CA_SLOW_START;
-                s->duplicate_acks = 0;
-            }
-            t = t->next;
-        }
+/* send new data if any */
+static void tcp_send_new_data(tcp_socket_t *s) {
+    if (s->state == TCP_ESTABLISHED) {
+        tcp_segment_from_sendbuf(s);
+    }
+}
 
-        if (s->used) {  /* check if socket still exists after potential removal */
-            /* send new data if any */
-            if (s->state == TCP_ESTABLISHED) {
-                tcp_segment_from_sendbuf(s);
-            }
-
-            /* TIME_WAIT expiry handling */
-            if (s->state == TCP_TIME_WAIT && now >= s->timewait_expires) {
-                s->state = TCP_CLOSED;
-                conn_list_remove(s);
-                free_socket_struct(s);
-            }
-        }
-        
-        s = next;
+/* TIME_WAIT expiry handling */
+static void tcp_handle_timewait_expiry(tcp_socket_t *s) {
+    if (s->state == TCP_TIME_WAIT && kernel_uptime_ms() >= s->timewait_expires) {
+        s->state = TCP_CLOSED;
+        conn_list_remove(s);
+        free_socket_struct(s);
     }
 }
 
@@ -731,12 +878,32 @@ int sock_connect(int sd, const uint8_t ip[4], uint16_t port) {
     serial_write("[TCP] sock_connect: queued SYN\n");
     tcp_send_queued(s);
     serial_write("[TCP] sock_connect: sent SYN\n");
-    /* block until established or timeout (simplified) */
+    
     uint64_t start = kernel_uptime_ms();
+    uint64_t last_debug = start;
     while (s->state != TCP_ESTABLISHED) {
-        if (kernel_uptime_ms() - start > 5000) return -1;
+        uint64_t now = kernel_uptime_ms();
+        
+        // Debug connection state every 1000ms
+        if (now - last_debug >= 1000) {
+            serial_write("[TCP] sock_connect: waiting for connection, state=");
+            serial_write_hex("", s->state);
+            serial_write(", elapsed=");
+            serial_write_hex("", now - start);
+            serial_write("ms\n");
+            last_debug = now;
+        }
+        
+        // Shorter timeout for testing - 3 seconds instead of 5
+        if (now - start > 3000) {
+            serial_write("[TCP] sock_connect: connection timeout\n");
+            return -1;
+        }
+        
         scheduler_sleep(s->wait_send);
     }
+    
+    serial_write("[TCP] sock_connect: connection established successfully\n");
     return 0;
 }
 
@@ -751,7 +918,7 @@ ssize_t sock_send(int sd, const void *buf, size_t len) {
         /* copy to send buffer (blocking if full) */
         uint32_t free_space = (s->send_buf_head <= s->send_buf_tail) ? 
             (SEND_BUF_SIZE - s->send_buf_tail - (s->send_buf_head==0?1:0)) :
-            (s->send_buf_head - s->send_buf_tail - 1);
+            (SEND_BUF_SIZE - s->send_buf_head);
         if (free_space == 0) {
             /* blocking behavior: wait unless non-blocking flag */
             if (s->flags & SOCK_NONBLOCK) return written ? (ssize_t)written : -1;
@@ -849,6 +1016,48 @@ int sock_poll(int *fds, int nfds, int *events_out, int timeout_ms) {
         if (timeout_ms > 0 && (int)(kernel_uptime_ms() - start) >= timeout_ms) return 0;
         /* sleep until an event; use a coarse wake channel */
         scheduler_sleep(&conn_list);
+    }
+}
+
+/* periodic timer function, called every 100ms */
+static void tcp_timer_fn(void) {
+    tcp_socket_t *s = conn_list;
+    while (s) {
+        tcp_socket_t *next_s = s->next;
+        int closed = 0;
+
+        if (s->used) {
+            /* Handle retransmissions */
+            tx_seg_t *t = s->tx_head;
+            if (t && t->ts_sent > 0 && (kernel_uptime_ms() - t->ts_sent) > t->rto_ms) {
+                if (t->retries < TCP_RETRANSMIT_MAX) {
+                    kernel_log("tcp: retransmitting seg seq=%u (rto=%u)\n", t->seq, t->rto_ms);
+                    net_ipv4_send(s->raddr, 6, t->data, (int)t->len);
+                    t->ts_sent = kernel_uptime_ms();
+                    t->retries++;
+                    s->rto *= 2; /* exponential backoff */
+                    if (s->rto > TCP_RTO_MAX) s->rto = TCP_RTO_MAX;
+                    t->rto_ms = s->rto;
+                } else {
+                    kernel_log("tcp: connection timeout, max retries reached\n");
+                    s->state = TCP_CLOSED;
+                    conn_list_remove(s);
+                    free_socket_struct(s);
+                    closed = 1;
+                }
+            }
+
+            /* Handle TIME_WAIT expiry */
+            if (!closed && s->state == TCP_TIME_WAIT) {
+                tcp_handle_timewait_expiry(s);
+            }
+
+            /* Try to send new data from buffer */
+            if (!closed) {
+                tcp_send_new_data(s);
+            }
+        }
+        s = next_s;
     }
 }
 

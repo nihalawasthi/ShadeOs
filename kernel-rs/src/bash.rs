@@ -45,6 +45,7 @@ extern "C" {
     fn sock_close(s: i32) -> i32;
     fn sock_set_nonblock(s: i32, nonblock: i32) -> i32;
     fn sock_poll(fds: *mut i32, nfds: i32, events_out: *mut i32, timeout_ms: i32) -> i32;
+    fn rtc_get_date(year: *mut i32, month: *mut i32, day: *mut i32, hour: *mut i32, minute: *mut i32, second: *mut i32);
 }
 
 // Utility functions
@@ -598,16 +599,16 @@ impl BashShell {
         match cmd {
             b"help" => self.cmd_help(), //work
             b"exit" => self.cmd_exit_heap(args_slice, argc), //work but needs to actually exit the shell
-            b"cd" => self.cmd_cd_heap(args_slice, argc), //works
+            b"cd" => self.cmd_cd_heap(args_slice, argc), //works but shouldn't work for non existent directories
             b"pwd" => self.cmd_pwd_heap(args_slice, argc),//works
-            b"ls" => self.cmd_ls_heap(args_slice, argc), //works but returns unneeded gibrish too
-            b"cat" => self.cmd_cat_heap(args_slice, argc), //cant test
-            b"echo" => self.cmd_echo_heap(args_slice, argc),//works
+            b"ls" => self.cmd_ls_heap(args_slice, argc), //works but needs to list (. and  ..) in the list (minor upgrade)
+            b"cat" => self.cmd_cat_heap(args_slice, argc), //cant test due to keyboard inout limitations doesnt supports alternate chars(shift + char)
+            b"echo" => self.cmd_echo_heap(args_slice, argc),//works but needs enhacement
             b"mkdir" => self.cmd_mkdir_heap(args_slice, argc),//works
             b"touch" => self.cmd_touch_heap(args_slice, argc),//works
             b"rm" => self.cmd_rm_heap(args_slice, argc),//works
-            b"env" => self.cmd_env(),
-            b"export" => self.cmd_export_heap(args_slice, argc), //assumed to be working cant test due to keyboard inout limitations doesnt supports alternate chars
+            b"env" => self.cmd_env(),//works
+            b"export" => self.cmd_export_heap(args_slice, argc), //works
             b"alias" => self.cmd_alias_heap(args_slice, argc), //works
             b"history" => self.cmd_history(), // works
             b"clear" => self.cmd_clear(), // works
@@ -646,7 +647,7 @@ impl BashShell {
             b"gunzip" => self.cmd_gunzip_heap(args_slice, argc),
             b"wget" => self.cmd_wget_heap(args_slice, argc),
             b"curl" => self.cmd_curl_heap(args_slice, argc),
-            b"ping" => self.cmd_ping_heap(args_slice, argc),
+            b"ping" => self.cmd_ping_heap(args_slice, argc), //has invalid opcode error
             b"httpget" => self.cmd_httpget_heap(args_slice, argc),
             b"netstat" => self.cmd_netstat(),
             b"strace" => self.cmd_strace_heap(args_slice, argc),
@@ -846,41 +847,76 @@ impl BashShell {
     }
     
     fn cmd_cd_heap(&mut self, args_buffer: &[u8], argc: usize) {
-        let path_buf;
         let path = if argc > 1 {
-            path_buf = self.get_arg_heap(args_buffer, 1).to_vec();
-            &path_buf[..]
+            self.get_arg_heap(args_buffer, 1)
         } else {
-            path_buf = self.get_env(b"HOME").unwrap_or(b"/").to_vec();
-            &path_buf[..]
-        };
-        if path == b"/" {
-            self.cwd[0] = b'/';
-            self.cwd[1] = 0;
-        } else if path == b".." {
-            let cwd_str = get_str(&self.cwd);
-            if cwd_str.len() > 1 {
-                if let Some(last_slash) = cwd_str.iter().rposition(|&b| b == b'/') {
-                    if last_slash == 0 {
-                        self.cwd[1] = 0;
-                    } else {
-                        self.cwd[last_slash] = 0;
-                    }
-                }
-            }
-        } else if path.starts_with(b"/") {
-            copy_str(&mut self.cwd, path);
-        } else {
-            let cwd_str = get_str(&self.cwd).to_vec();
-            if cwd_str != b"/" {
-                str_append(&mut self.cwd, b"/");
-            }
-            str_append(&mut self.cwd, path);
+            self.get_env(b"HOME").unwrap_or(b"/")
+         };
+        if path.is_empty() {
+            self.last_exit_code = 0;
+            return;
         }
-        let cwd_val = get_str(&self.cwd).to_vec();
-        self.set_env(b"PWD", &cwd_val);
-        self.last_exit_code = 0;
+
+        let mut new_path_abs = [0u8; MAX_PATH_LEN];
+
+        if path.starts_with(b"/") {
+            copy_str(&mut new_path_abs, path);
+        } else {
+             let cwd_str = get_str(&self.cwd);
+            if path == b".." {
+                 if cwd_str.len() > 1 {
+                     if let Some(last_slash) = cwd_str.iter().rposition(|&b| b == b'/') {
+                        if last_slash > 0 {
+                            copy_str(&mut new_path_abs, &cwd_str[..last_slash]);
+                         } else {
+                            copy_str(&mut new_path_abs, b"/");
+                         }
+                     }
+                } else {
+                    copy_str(&mut new_path_abs, b"/");
+                 }
+            } else if path == b"." {
+                copy_str(&mut new_path_abs, cwd_str);
+             } else {
+                copy_str(&mut new_path_abs, cwd_str);
+                 if cwd_str != b"/" {
+                    str_append(&mut new_path_abs, b"/");
+                 }
+            str_append(&mut new_path_abs, path);
+             }
+        }
+
+        // To check if the directory exists, we'll try to create a temporary file in it.
+        let mut temp_file_path = [0u8; MAX_PATH_LEN];
+        copy_str(&mut temp_file_path, get_str(&new_path_abs));
+        if get_str(&new_path_abs) != b"/" {
+            str_append(&mut temp_file_path, b"/");
+        }
+        // A unique name to avoid collisions.
+        str_append(&mut temp_file_path, b".__gemini_cd_check");
+
+        let result = unsafe { rust_vfs_create_file(temp_file_path.as_ptr()) };
+
+        if result == 0 {
+            // Success, the directory exists.
+            // Clean up the temporary file.
+            unsafe { rust_vfs_unlink(temp_file_path.as_ptr()); }
+
+            // Update cwd.
+            copy_str(&mut self.cwd, get_str(&new_path_abs));
+             let cwd_val = get_str(&self.cwd).to_vec();
+             self.set_env(b"PWD", &cwd_val);
+             self.last_exit_code = 0;
+        } else {
+            // If creating a file fails, it could be because it's a file, not a directory,
+            // or it doesn't exist. In either case, we can't cd into it.
+            print_str(b"cd: ");
+            print_str(path);
+            print_str(b": No such file or directory\n");
+            self.last_exit_code = 1;
+         }
     }
+ 
 
     fn cmd_pwd_heap(&mut self, _args_buffer: &[u8], _argc: usize) {
         let cwd_str = get_str(&self.cwd);
@@ -1267,11 +1303,78 @@ impl BashShell {
             self.last_exit_code = 1;
             return;
         }
-        
-        let _source = self.get_arg_heap(args_buffer, 1);
-        let _dest = self.get_arg_heap(args_buffer, 2);
-        print_str(b"mv: not implemented\n");
-        self.last_exit_code = 1;
+
+        let source = self.get_arg_heap(args_buffer, 1);
+        let dest = self.get_arg_heap(args_buffer, 2);
+
+        let mut source_path = [0u8; MAX_PATH_LEN];
+        if source.starts_with(b"/") {
+            copy_str(&mut source_path, source);
+        } else {
+            copy_str(&mut source_path, get_str(&self.cwd));
+            if get_str(&self.cwd) != b"/" {
+                str_append(&mut source_path, b"/");
+            }
+            str_append(&mut source_path, source);
+        }
+
+        let mut dest_path = [0u8; MAX_PATH_LEN];
+        if dest.starts_with(b"/") {
+            copy_str(&mut dest_path, dest);
+        } else {
+            copy_str(&mut dest_path, get_str(&self.cwd));
+            if get_str(&self.cwd) != b"/" {
+                str_append(&mut dest_path, b"/");
+            }
+            str_append(&mut dest_path, dest);
+        }
+
+        let mut buffer = [0u8; 4096];
+        let bytes_read = unsafe { rust_vfs_read(source_path.as_ptr(), buffer.as_mut_ptr(), 4095) };
+
+        if bytes_read <= 0 {
+            print_str(b"mv: cannot stat '" );
+            print_str(source);
+            print_str(b"': No such file or directory\n");
+            self.last_exit_code = 1;
+            return;
+        }
+
+        let write_result = unsafe { rust_vfs_write(dest_path.as_ptr(), buffer.as_ptr(), bytes_read as u64) };
+
+        if write_result != bytes_read as u64 {
+            // Attempt to create the file first if it doesn't exist
+            if unsafe { rust_vfs_create_file(dest_path.as_ptr()) } == 0 {
+                let write_result2 = unsafe { rust_vfs_write(dest_path.as_ptr(), buffer.as_ptr(), bytes_read as u64) };
+                if write_result2 != bytes_read as u64 {
+                    print_str(b"mv: cannot move '" );
+                    print_str(source);
+                    print_str(b"' to '" );
+                    print_str(dest);
+                    print_str(b"': Write failed\n");
+                    self.last_exit_code = 1;
+                    return;
+                }
+            } else {
+                print_str(b"mv: cannot move '" );
+                print_str(source);
+                print_str(b"' to '" );
+                print_str(dest);
+                print_str(b"': Cannot create file\n");
+                self.last_exit_code = 1;
+                return;
+            }
+        }
+
+        if unsafe { rust_vfs_unlink(source_path.as_ptr()) } != 0 {
+            print_str(b"mv: failed to remove original file '" );
+            print_str(source);
+            print_str(b"'\n");
+            self.last_exit_code = 1;
+            return;
+        }
+
+        self.last_exit_code = 0;
     }
     
     fn cmd_chmod_heap(&mut self, args_buffer: &[u8], argc: usize) {
@@ -2461,20 +2564,58 @@ impl BashShell {
     
     fn cmd_date(&mut self) {
         unsafe {
-            let ticks = timer_get_ticks();
-            format_date(ticks);
-            print_str(b"\n");
+                let mut year: i32 = 0;
+                let mut month: i32 = 0;
+                let mut day: i32 = 0;
+                let mut hour: i32 = 0;
+                let mut minute: i32 = 0;
+                let mut second: i32 = 0;
+
+                rtc_get_date(
+                    &mut year, &mut month, &mut day,
+                    &mut hour, &mut minute, &mut second,
+                );
+
+                let msg = alloc::format!("{}-{}-{} {:02}:{:02}:{:02}\n",
+                    day, month, year, hour, minute, second);
+                print_str(msg.as_bytes());
+            }
+            self.last_exit_code = 0;
         }
-        self.last_exit_code = 0;
-    }
     
     fn cmd_uptime(&mut self) {
-        unsafe {
-            let ticks = timer_get_ticks();
-            format_uptime(ticks);
-            print_str(b", 1 user, load average: 0.00, 0.00, 0.00\n");
+    unsafe {
+        extern "C" { 
+            fn timer_get_seconds() -> u64;
+            fn get_load1() -> f64;
+            fn get_load5() -> f64;
+            fn get_load15() -> f64;
         }
-        self.last_exit_code = 0;
+
+        let secs = timer_get_seconds();
+        let days = secs / 86400;
+        let hours = (secs % 86400) / 3600;
+        let minutes = (secs % 3600) / 60;
+        let seconds = secs % 60;
+
+        let uptime_str = if days > 0 {
+            alloc::format!("{} day{}, {:02}:{:02}", 
+                days, if days > 1 { "s" } else { "" }, hours, minutes)
+        } else if hours > 0 {
+            alloc::format!("{:02}:{:02}", hours, minutes)
+        } else if minutes > 0 {
+            alloc::format!("{} min", minutes)
+        } else {
+            alloc::format!("{} sec", seconds)
+        };
+
+        let msg = alloc::format!(
+            " up {},  1 user,  load average: {:.2}, {:.2}, {:.2}\n",
+            uptime_str, get_load1(), get_load5(), get_load15()
+        );
+
+        print_str(msg.as_bytes());
+    }
     }
     
     fn cmd_ps(&mut self) {
@@ -2703,57 +2844,4 @@ fn format_uptime(ticks: u64) {
         print_int(secs as usize);
         print_str(b" seconds");
     }
-}
-
-fn format_date(ticks: u64) {
-    // Start from a more recent base date (Jan 1, 2025) and add seconds
-    // This avoids the complex leap year calculations for now
-    let base_time = 1735689600; // Unix timestamp for Jan 1, 2025 00:00:00 UTC
-    let seconds = ticks / 100;
-    let current_time = base_time + seconds as i64;
-    
-    // For now, let's use a much simpler approach that just shows relative time
-    // This will be more accurate than trying to calculate exact dates
-    let days_since_base = current_time / 86400;
-    let seconds_in_day = current_time % 86400;
-    let hour = (seconds_in_day / 3600) as i32;
-    let minute = ((seconds_in_day % 3600) / 60) as i32;
-    let second = (seconds_in_day % 60) as i32;
-    
-    // Simple month/day calculation based on days since base
-    // But limit to reasonable values to avoid overflow
-    let day_of_year = if days_since_base > 365 { days_since_base % 365 } else { days_since_base };
-    
-    let month = if day_of_year < 31 { 1 } else if day_of_year < 59 { 2 } else if day_of_year < 90 { 3 }
-                else if day_of_year < 120 { 4 } else if day_of_year < 151 { 5 } else if day_of_year < 181 { 6 }
-                else if day_of_year < 212 { 7 } else if day_of_year < 243 { 8 } else if day_of_year < 273 { 9 }
-                else if day_of_year < 304 { 10 } else if day_of_year < 334 { 11 } else { 12 };
-    
-    let day = day_of_year - match month {
-        1 => 0, 2 => 31, 3 => 59, 4 => 90, 5 => 120, 6 => 151,
-        7 => 181, 8 => 212, 9 => 243, 10 => 273, 11 => 304, _ => 334
-    } + 1;
-    
-    let month_names = [b"Jan", b"Feb", b"Mar", b"Apr", b"May", b"Jun",
-                       b"Jul", b"Aug", b"Sep", b"Oct", b"Nov", b"Dec"];
-    
-    // Print month name
-    print_str(month_names[month as usize - 1]);
-    print_str(b" ");
-    
-    // Print day
-    print_int(day as usize);
-    print_str(b" ");
-    
-    // Print time
-    if hour < 10 { print_str(b"0"); }
-    print_int(hour as usize);
-    print_str(b":");
-    if minute < 10 { print_str(b"0"); }
-    print_int(minute as usize);
-    print_str(b":");
-    if second < 10 { print_str(b"0"); }
-    print_int(second as usize);
-    
-    print_str(b" UTC 2025");
 }

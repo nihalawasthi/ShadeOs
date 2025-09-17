@@ -87,36 +87,19 @@ fn get_path_components(path: *const u8) -> Vec<String> {
     if path.is_null() {
         return Vec::new();
     }
-    
-    let mut components = Vec::new();
-    let mut current = String::new();
-    let mut i = 0;
-    
+    let mut path_str = String::new();
     unsafe {
-        loop {
-            let c = *path.add(i);
-            if c == 0 {
-                break;
-            }
-            
-            if c == b'/' {
-                if !current.is_empty() {
-                    components.push(current.clone());
-                    current.clear();
-                }
-            } else {
-                current.push(c as char);
-            }
-            
-            i += 1;
-        }
-        
-        if !current.is_empty() {
-            components.push(current);
+        let mut ptr = path;
+        while *ptr != 0 {
+            path_str.push(*ptr as char);
+            ptr = ptr.add(1);
         }
     }
-    
-    components
+
+    path_str.split('/')
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect()
 }
 
 fn find_entry(path: *const u8) -> Option<&'static mut FileEntry> {
@@ -149,26 +132,15 @@ fn find_parent_and_name(path: *const u8) -> Option<(&'static mut FileEntry, Stri
     if components.is_empty() {
         return None;
     }
-    
-    let filename = components.last().unwrap().clone();
-    let parent_components = &components[..components.len() - 1];
-    
+
+    let (filename, parent_components) = components.split_last()?;
+
     unsafe {
-        if let Some(ref mut root) = ROOT_FS {
-            let mut current = root;
-            
-            for component in parent_components {
-                if let Some(child) = current.children.get_mut(component) {
-                    current = child;
-                } else {
-                    return None;
-                }
-            }
-            
-            Some((current, filename))
-        } else {
-            None
+        let mut current = ROOT_FS.as_mut()?;
+        for component in parent_components {
+            current = current.children.get_mut(component)?;
         }
+        Some((current, filename.to_string()))
     }
 }
 
@@ -265,53 +237,103 @@ pub fn list_directory(path: *const u8) -> i32 {
             FileType::Directory => {
                 // Enter critical section to prevent concurrent screen access
                 unsafe { sys_cli(); }
-                
+
+                let header = b"Type  Permissions  Links  Owner  Group  Size      Date   Time   Name\n\0";
+                unsafe {
+                    vga_print(header.as_ptr());
+                    serial_write(header.as_ptr());
+                }
+
+                let separator = b"----  -----------  -----  -----  -----  ----      ----   ----   ----\n\0";
+                unsafe {
+                    vga_print(separator.as_ptr());
+                    serial_write(separator.as_ptr());
+                }
+
                 for (name, child) in &entry.children {
                     let type_char = match child.file_type {
-                        FileType::Directory => b'd',
-                        FileType::Regular => b'-',
+                        FileType::Directory => 'd',
+                        FileType::Regular => '-',
                     };
-                    
+
+                    let perms = "rwxr-xr-x";
+                    let links = "1";
+                    let owner = "root";
+                    let group = "root";
+                    let size = child.data.len();
+                    let date = "Jan  1 00:00";
+
+                    // Format the line manually
+                    let mut line_buf = [0u8; 256];
+                    let mut offset = 0;
+
+                    let mut write = |s: &[u8]| {
+                        if offset + s.len() < line_buf.len() {
+                            line_buf[offset..offset+s.len()].copy_from_slice(s);
+                            offset += s.len();
+                        }
+                    };
+
+                    // Type
+                    write(&[type_char as u8]);
+                    write(b"  ");
+
+                    // Permissions
+                    write(perms.as_bytes());
+                    write(b"  ");
+
+                    // Links
+                    write(links.as_bytes());
+                    write(b"  ");
+
+                    // Owner
+                    write(owner.as_bytes());
+                    write(b"  ");
+
+                    // Group
+                    write(group.as_bytes());
+                    write(b"  ");
+
+                    // Size
+                    let mut size_buf = [0u8; 10];
+                    let mut temp_size = size;
+                    let mut i = size_buf.len();
+                    if temp_size == 0 {
+                        i -= 1;
+                        size_buf[i] = b'0';
+                    } else {
+                        while temp_size > 0 && i > 0 {
+                            i -= 1;
+                            size_buf[i] = b'0' + (temp_size % 10) as u8;
+                            temp_size /= 10;
+                        }
+                    }
+                    let size_str = &size_buf[i..];
+                    // pad with spaces to align
+                    for _ in 0..(10 - size_str.len()) {
+                        write(b" ");
+                    }
+                    write(size_str);
+
+
+                    write(b"  ");
+
+                    // Date
+                    write(date.as_bytes());
+                    write(b"  ");
+
+                    // Name
+                    write(name.as_bytes());
+
+                    // Newline and Null terminator
+                    write(b"\n");
+                    line_buf[offset] = 0;
+
                     unsafe {
-                        vga_print([type_char, 0].as_ptr());
-                        vga_print(b"rwxr-xr-x 1 root root ".as_ptr());
-                        
-                        // Print file size
-                        let size = child.data.len();
-                        let mut size_str = [0u8; 16];
-                        let mut temp_size = size;
-                        let mut i = 0;
-                        
-                        if temp_size == 0 {
-                            size_str[0] = b'0';
-                            i = 1;
-                        } else {
-                            while temp_size > 0 {
-                                size_str[i] = b'0' + (temp_size % 10) as u8;
-                                temp_size /= 10;
-                                i += 1;
-                            }
-                        }
-                        
-                        // Reverse digits
-                        for j in 0..i/2 {
-                            let temp = size_str[j];
-                            size_str[j] = size_str[i-1-j];
-                            size_str[i-1-j] = temp;
-                        }
-                        size_str[i] = 0;
-                        
-                        vga_print(size_str.as_ptr());
-                        vga_print(b" Jan  1 00:00 ".as_ptr());
-                        
-                        // Print filename
-                        for &byte in name.as_bytes() {
-                            vga_print([byte, 0].as_ptr());
-                        }
-                        vga_print(b"\n".as_ptr());
+                        vga_print(line_buf.as_ptr());
                     }
                 }
-                
+
                 // Exit critical section
                 unsafe { sys_sti(); }
                 0

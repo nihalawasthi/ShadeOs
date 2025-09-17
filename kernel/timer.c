@@ -48,13 +48,29 @@ void timer_init(uint32_t frequency) {
     num_periodic_timers = 0;
 }
 
+// scale by 1024 to avoid floating point
+static long load1 = 1024, load5 = 1024, load15 = 1024;  // ≈ 1.00 load
+
+#define EXP_1   1884  // 0.9200 * 2048
+#define EXP_5   2014  // 0.9835 * 2048
+#define EXP_15  2035  // 0.9945 * 2048
+#define FIXED_1 (1<<11)
+
+void update_load_average() {
+    int runnable_tasks = 1; // later: count real tasks
+
+    load1  = (load1  * EXP_1  + runnable_tasks * (FIXED_1 - EXP_1))  >> 11;
+    load5  = (load5  * EXP_5  + runnable_tasks * (FIXED_1 - EXP_5))  >> 11;
+    load15 = (load15 * EXP_15 + runnable_tasks * (FIXED_1 - EXP_15)) >> 11;
+}
+
+long get_load1()  { return load1; }
+long get_load5()  { return load5; }
+long get_load15() { return load15; }
+
 void timer_interrupt_handler() {
     timer_ticks++;
-    if (timer_ticks % 100 == 0) {
-        // vga_set_color(0x0B); // Cyan
-        // vga_print("[TIMER] 100 ticks elapsed\n");
-        // vga_set_color(0x0F); // White
-    }
+
     
     uint64_t current_ms = kernel_uptime_ms();
     for (int i = 0; i < num_periodic_timers; i++) {
@@ -63,12 +79,12 @@ void timer_interrupt_handler() {
             periodic_timers[i].next_trigger = current_ms + periodic_timers[i].interval_ms;
         }
     }
-    
+    if (timer_ticks % pit_freq_hz == 0) {
+        update_load_average();
+    }
     // Call task scheduler for preemptive multitasking
     timer_task_handler();
-    
-    // EOI is sent by the main isr_handler
-}
+    }
 
 // Wrapper function for the interrupt handler
 void timer_interrupt_wrapper(registers_t regs) {
@@ -77,6 +93,40 @@ void timer_interrupt_wrapper(registers_t regs) {
 }
 
 uint64_t timer_get_ticks() { return timer_ticks; }
+// Returns seconds since boot
+uint64_t timer_get_seconds() {
+    return timer_ticks / pit_freq_hz;
+}
+
+// Naive date (assumes boot = 1 Jan 1970 UTC)
+void timer_get_date(int *year, int *month, int *day, int *hour, int *minute, int *second) {
+    static const int days_in_month[] = { 31,28,31,30,31,30,31,31,30,31,30,31 };
+    uint64_t secs = timer_get_seconds();
+
+    *second = secs % 60;
+    secs /= 60;
+    *minute = secs % 60;
+    secs /= 60;
+    *hour   = (secs % 24);
+    secs /= 24;
+
+    int days = (int)secs;
+    *year = 1970;
+    *month = 1;
+    *day = 1;
+
+    while (days >= 365) {
+        days -= 365;
+        (*year)++;
+    }
+
+    for (int m=0; m<12; m++) {
+        if (days < days_in_month[m]) break;
+        days -= days_in_month[m];
+        (*month)++;
+    }
+    *day += days;
+}
 
 uint64_t kernel_uptime_ms(void) {
     /* Convert ticks to milliseconds using current PIT frequency. */

@@ -245,10 +245,16 @@ void kernel_main(uint64_t mb2_info_ptr) {
     icmp_init();
     tcp_init();
 
-
     // PCI bus
     extern void pci_init(void);
     pci_init();
+    serial_write("[DEBUG] PCI init completed successfully\n");
+    rust_vga_print("[DEBUG] PCI init completed successfully\n");
+    
+    // Add memory barrier to prevent compiler optimization issues
+    __asm__ volatile("" ::: "memory");
+    
+    serial_write("[DEBUG] About to call rtl8139_init\n");
 
     // Network
     rtl8139_init();
@@ -259,7 +265,7 @@ void kernel_main(uint64_t mb2_info_ptr) {
 
     // TCP Test: Attempt to fetch a page from the QEMU host
     serial_write("[TEST] Starting TCP HTTP GET test...\n");
-    uint8_t qemu_host_ip[4] = {10, 0, 2, 2};
+    // uint8_t qemu_host_ip[4] = {10, 0, 2, 2};
     // http_get(qemu_host_ip, "10.0.2.2", "/");
     serial_write("[TEST] TCP test finished.\n");
 
@@ -304,7 +310,6 @@ void kernel_main(uint64_t mb2_info_ptr) {
     rust_vfs_create_file("/bin/bash\0");
     static const char bash_binary[] = "/bin/bash\0";
     serial_write("[BOOT] Creating bash binary...\n");
-    // Minimal valid ELF64 binary (hello world stub, 128 bytes)
     static const unsigned char test_elf_stub[128] = {
         0x7F, 'E', 'L', 'F', 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         2, 0, 0x3E, 0x00, 1, 0, 0, 0, 0x78, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -350,13 +355,4 @@ void kernel_main(uint64_t mb2_info_ptr) {
     rust_vga_print("Bash-compatible shell ready!\n");
     rust_vga_set_color(0x0F);
     rust_vga_print("\n");
-
-    // Minimal heap allocation and write test
-    // void* test_ptr = rust_kmalloc(64);
-    // if (test_ptr) {
-    //     ((char*)test_ptr)[0] = 0x42;
-    //     serial_write("[C-DEBUG] kmalloc write OK\n");
-    // } else {
-    //     serial_write("[C-DEBUG] kmalloc failed\n");
-    // }
 }

@@ -155,20 +155,20 @@ pub extern "C" fn rust_keyboard_handle_interrupt() {
 pub extern "C" fn rust_keyboard_put_scancode(scancode: u8) {
     unsafe {
         // Debug log the received scancode
-        let debug_msg = alloc::format!("[RUST KB] Received scancode: 0x{:02x}\n\0", scancode);
-        serial_write(debug_msg.as_ptr());
+        //let debug_msg = alloc::format!("[RUST KB] Received scancode: 0x{:02x}\n\0", scancode);
+        //serial_write(debug_msg.as_ptr());
         
         // Only handle key press events (bit 7 clear)
         if scancode & 0x80 == 0 {
             if let Some(ascii) = scancode_to_ascii(scancode) {
-                let debug_msg = alloc::format!("[RUST KB] Converted to ASCII: '{}' (0x{:02x})\n\0", ascii as char, ascii);
-                serial_write(debug_msg.as_ptr());
+                //let debug_msg = alloc::format!("[RUST KB] Converted to ASCII: '{}' (0x{:02x})\n\0", ascii as char, ascii);
+                //serial_write(debug_msg.as_ptr());
                 
                 if let Some(ref mut buffer) = KEYBOARD_BUFFER {
                     if buffer.len() < 256 { // Prevent buffer overflow
                         buffer.push_back(ascii);
-                        let debug_msg = alloc::format!("[RUST KB] Added to buffer, buffer size: {}\n\0", buffer.len());
-                        serial_write(debug_msg.as_ptr());
+                        //let debug_msg = alloc::format!("[RUST KB] Added to buffer, buffer size: {}\n\0", buffer.len());
+                        //serial_write(debug_msg.as_ptr());
                     } else {
                         serial_write(b"[RUST KB] Buffer full, dropping character\n\0".as_ptr());
                     }
@@ -176,12 +176,12 @@ pub extern "C" fn rust_keyboard_put_scancode(scancode: u8) {
                     serial_write(b"[RUST KB] Buffer not initialized\n\0".as_ptr());
                 }
             } else {
-                let debug_msg = alloc::format!("[RUST KB] No ASCII mapping for scancode: 0x{:02x}\n\0", scancode);
-                serial_write(debug_msg.as_ptr());
+                //let debug_msg = alloc::format!("[RUST KB] No ASCII mapping for scancode: 0x{:02x}\n\0", scancode);
+                //serial_write(debug_msg.as_ptr());
             }
         } else {
-            let debug_msg = alloc::format!("[RUST KB] Key release event: 0x{:02x}\n\0", scancode);
-            serial_write(debug_msg.as_ptr());
+            let debug_msg = alloc::format!("{:02x}\0", scancode);
+            //serial_write(debug_msg.as_ptr());
         }
     }
 }

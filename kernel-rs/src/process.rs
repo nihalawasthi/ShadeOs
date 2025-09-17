@@ -262,7 +262,7 @@ impl ProcessManager {
             
             msg[i] = b'\n'; i += 1;
             msg[i] = 0;
-            serial_write(msg.as_ptr());
+            //serial_write(msg.as_ptr());
         }
         
         pid
@@ -307,7 +307,7 @@ impl ProcessManager {
                 
                 msg[i] = b'\n'; i += 1;
                 msg[i] = 0;
-                serial_write(msg.as_ptr());
+                //serial_write(msg.as_ptr());
             }
         }
     }
@@ -366,7 +366,7 @@ impl ProcessManager {
                 for &b in priv_str { if i < msg.len() - 3 { msg[i] = b; i += 1; } }
                 
                 msg[i] = 0;
-                serial_write(msg.as_ptr());
+                //serial_write(msg.as_ptr());
             }
         }
     }
