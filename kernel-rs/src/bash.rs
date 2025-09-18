@@ -33,6 +33,7 @@ extern "C" {
     fn icmp_send_echo_request(dst_ip: *const u8, id: u16, seq: u16, data: *const u8, dlen: i32) -> i32;
     fn netstat_dump();
     fn http_get(url: *const u8, out_buf: *mut u8, out_len: i32) -> i32;
+    fn pci_test_devices();
 
     // socket-level FFI
     fn sock_socket() -> i32;
@@ -625,6 +626,7 @@ impl BashShell {
             b"ifconfig" => self.cmd_ifconfig(),//works with default will be able to test soon after tcp implementation
             b"route" => self.cmd_route(),//works
             b"htop" => self.cmd_htop(),//works
+            b"lspci" => self.cmd_device(),//works
             b"mount" => self.cmd_mount(),
             b"ssh" => self.cmd_ssh_heap(args_slice, argc),
             b"scp" => self.cmd_scp_heap(args_slice, argc),
@@ -2667,7 +2669,13 @@ impl BashShell {
         print_str(b"ramfs             16384     0     16384   0% /\n");
         self.last_exit_code = 0;
     }
-    
+
+    fn cmd_device(&mut self) {
+        unsafe{
+        pci_test_devices();
+        };
+        self.last_exit_code = 0;
+    }
     fn cmd_mount(&mut self) {
         print_str(b"ramfs on / type ramfs (rw,relatime)\n");
         self.last_exit_code = 0;
