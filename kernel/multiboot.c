@@ -25,10 +25,8 @@ typedef struct {
 } mb2_mmap_entry_t;
 
 void parse_multiboot2_memory_map(uint64_t mb2_info_ptr) {
-    serial_write("[BOOT] Parsing Multiboot2 memory map...\n");
     serial_write_hex("[MB2] mb2_info_ptr: ", mb2_info_ptr);
 
-    serial_write("[DEBUG] parse_multiboot2_memory_map: start\n");
     // Check if pointer is valid and aligned
     if (mb2_info_ptr == 0 || (mb2_info_ptr & 0x7) != 0) {
         serial_write("[BOOT] ERROR: Invalid or unaligned Multiboot2 info pointer!\n");
@@ -39,8 +37,6 @@ void parse_multiboot2_memory_map(uint64_t mb2_info_ptr) {
     uint32_t total_size = *(uint32_t*)mb2;
     uint32_t reserved = *(uint32_t*)(mb2 + 4);
 
-    // Debug: Print first 32 bytes at mb2_info_ptr
-    vga_print("[MB2] Raw bytes: ");
     for (int i = 0; i < 32; i++) {
         uint8_t byte = mb2[i];
         vga_putchar(' ');
@@ -50,9 +46,8 @@ void parse_multiboot2_memory_map(uint64_t mb2_info_ptr) {
         digit = byte & 0xF;
         vga_putchar(digit < 10 ? '0' + digit : 'A' + digit - 10);
     }
-    vga_print("\n");
 
-    // Validate total_size
+
     if (total_size < 8 || total_size > 0x1000000) {
         serial_write("[BOOT] ERROR: Invalid total_size!\n");
         return;
@@ -65,7 +60,6 @@ void parse_multiboot2_memory_map(uint64_t mb2_info_ptr) {
         tag_count++;
         if (tag->type == MULTIBOOT2_TAG_TYPE_MMAP) {
             mb2_tag_mmap_t* mmap_tag = (mb2_tag_mmap_t*)tag;
-            serial_write("[BOOT] Found memory map tag\n");
             uint8_t* mmap_end = (uint8_t*)mmap_tag + mmap_tag->size;
             for (uint8_t* entry_ptr = (uint8_t*)mmap_tag + sizeof(mb2_tag_mmap_t);
                  entry_ptr < mmap_end;
@@ -80,10 +74,8 @@ void parse_multiboot2_memory_map(uint64_t mb2_info_ptr) {
                 }
                 mb2_mmap_entry_t* entry = (mb2_mmap_entry_t*)entry_ptr;
             }
-            serial_write("[DEBUG] parse_multiboot2_memory_map: finished mmap entry loop\n");
         }
         // Move to next tag (aligned)
         tag = (mb2_tag_t*)(((uintptr_t)((uint8_t*)tag + tag->size + MULTIBOOT2_TAG_ALIGN - 1)) & ~(uintptr_t)(MULTIBOOT2_TAG_ALIGN - 1));
     }
-    serial_write("[DEBUG] parse_multiboot2_memory_map: done\n");
 }

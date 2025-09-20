@@ -55,7 +55,6 @@ pub fn init() {
 #[no_mangle]
 pub extern "C" fn rust_keyboard_init() {
     unsafe {
-        serial_write(b"[RUST KB] Keyboard buffer initialized\n\0".as_ptr());
         KEYBOARD_BUFFER = Some(VecDeque::new());
         KEYBOARD_INITIALIZED.store(true, Ordering::SeqCst);
     }

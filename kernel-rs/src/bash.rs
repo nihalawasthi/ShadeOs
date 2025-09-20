@@ -8,6 +8,7 @@ use core::option::Option::{Some, None};
 extern "C" {
     fn vga_clear();
     fn vga_print(s: *const u8);
+    fn vga_set_color(color: u8);
     fn rust_keyboard_clear_buffer();
     fn serial_write(s: *const u8);
     fn rust_keyboard_get_char() -> i32;
@@ -117,15 +118,11 @@ fn str_append(dest: &mut [u8], src: &[u8]) {
     let dest_len = get_str(dest).len();
     let remaining = dest.len().saturating_sub(dest_len + 1);
     let copy_len = core::cmp::min(remaining, src.len());
-    
-    unsafe { serial_write(b"[BASH-DEBUG] str_append: before copy_from_slice\r\n\0".as_ptr()); }
-    
+        
     if dest_len + copy_len < dest.len() {
         dest[dest_len..dest_len + copy_len].copy_from_slice(&src[..copy_len]);
         dest[dest_len + copy_len] = 0;
-    }
-    
-    unsafe { serial_write(b"[BASH-DEBUG] str_append: after copy_from_slice\r\n\0".as_ptr()); }
+    }    
 }
 
 fn find_byte(haystack: &[u8], needle: u8) -> Option<usize> {
@@ -192,28 +189,16 @@ pub extern "C" fn rust_bash_init() {
         
         // Store in global
         BASH_SHELL = Some(shell);
-        serial_write(b"[BASH-DEBUG] Exiting rust_bash_init\0".as_ptr());
-        serial_write(b"\n\0".as_ptr());
     }
 }
 
 impl BashShell {
-    pub fn new() -> BashShell {
-        unsafe { serial_write(b"[BASH-DEBUG] Enter BashShell::new()\n\0".as_ptr()); }
-        
+    pub fn new() -> BashShell {        
         // Calculate allocation sizes
         let env_size = core::mem::size_of::<EnvVar>() * MAX_ENV_VARS;
         let alias_size = core::mem::size_of::<Alias>() * MAX_ALIASES;
         let history_size = MAX_CMD_LEN * MAX_HISTORY;
         
-        unsafe { serial_write(b"[BASH-DEBUG] Allocating memory...\n\0".as_ptr()); }
-        
-        unsafe {
-            serial_write_dec(b"[BASH-DEBUG] MAX_HISTORY: \0".as_ptr(), MAX_HISTORY as u64);
-            serial_write(b"\n\0".as_ptr());
-            serial_write_dec(b"[BASH-DEBUG] MAX_CMD_LEN: \0".as_ptr(), MAX_CMD_LEN as u64);
-            serial_write(b"\n\0".as_ptr());
-        }
         let env_vars_ptr = unsafe { rust_kmalloc(env_size) as *mut EnvVar };
         let aliases_ptr = unsafe { rust_kmalloc(alias_size) as *mut Alias };
         let history_ptr = unsafe { rust_kmalloc(history_size) as *mut u8 };
@@ -422,28 +407,23 @@ impl BashShell {
     }
     
     pub fn run(&mut self) {
-        unsafe { serial_write(b"[BASH-DEBUG] Enter BashShell::run()\n\0".as_ptr()); }
-        // vga_print(b"ShadeOS Bash-compatible Shell v1.0\n".as_ptr());
-        // vga_print(b"Type 'help' for available commands.\n\n".as_ptr());
-        
         unsafe { vga_clear(); }
         unsafe { rust_keyboard_clear_buffer(); }
+        unsafe { vga_set_color(0x0E); }        
+        print_str(b"ShadeOS boot complete. Welcome!\n");
+        unsafe { vga_set_color(0x0F); }
         unsafe {
             extern "C" { fn sys_sti(); }
             sys_sti();
-            serial_write(b"[BASH-DEBUG] Interrupts enabled\n\0".as_ptr());
         }
         
-        unsafe { serial_write(b"[BASH-DEBUG] Starting shell loop\n\0".as_ptr()); }
         loop {
             self.update_prompt();
             print_str(get_str(&self.prompt));
             let mut input = [0u8; MAX_CMD_LEN];
             if self.read_line(&mut input) {
-                unsafe { serial_write(b"[BASH-DEBUG] After read_line (got input)\n\0".as_ptr()); }
                 // Debug: print raw input buffer
                 unsafe {
-                    serial_write(b"[BASH-DEBUG] Raw input buffer: \0".as_ptr());
                     for i in 0..MAX_CMD_LEN {
                         if input[i] == 0 { break; }
                         let mut hex = [b'0'; 3];
@@ -456,11 +436,11 @@ impl BashShell {
                     serial_write(b"\n\0".as_ptr());
                 }
                 let input_str = get_str(&input);
-                unsafe {
-                    serial_write(b"[BASH-DEBUG] input_str len: \0".as_ptr());
-                    serial_write_dec(b"\0".as_ptr(), input_str.len() as u64);
-                    serial_write(b"\n\0".as_ptr());
-                }
+                // unsafe {
+                //     serial_write(b"[BASH-DEBUG] input_str len: \0".as_ptr());
+                //     serial_write_dec(b"\0".as_ptr(), input_str.len() as u64);
+                //     serial_write(b"\n\0".as_ptr());
+                // }
                 // Only process non-empty, non-whitespace commands
                 let trimmed = input_str.iter().position(|&c| c != b' ' && c != b'\t').map(|start| {
                     let end = input_str.iter().rposition(|&c| c != b' ' && c != b'\t').unwrap_or(start);
@@ -471,11 +451,8 @@ impl BashShell {
                     self.add_to_history(trimmed);
                     self.execute_command(trimmed);
                 } else {
-                    // Empty command - just skip to next line like regular shells
                     unsafe { serial_write(b"[BASH-DEBUG] Empty command, continuing to next prompt\n\0".as_ptr()); }
-                    // No need to do anything else, the loop will continue to show the next prompt
                 }
-                unsafe { serial_write(b"[BASH-DEBUG] After processing input\n\0".as_ptr()); }
             } else {
                 unsafe { serial_write(b"[BASH-DEBUG] After read_line (no input)\n\0".as_ptr()); }
             }
@@ -558,7 +535,6 @@ impl BashShell {
         unsafe {
             serial_write(b"[BASH-DEBUG] parse_command_heap returned argc=\0".as_ptr());
             serial_write_dec(b"\0".as_ptr(), argc as u64);
-            serial_write(b"\n\0".as_ptr());
         }
         
         if argc == 0 { 
@@ -799,7 +775,6 @@ impl BashShell {
         unsafe { 
             serial_write(b"[BASH-DEBUG] get_arg_heap called with n=\0".as_ptr());
             serial_write_dec(b"\0".as_ptr(), n as u64);
-            serial_write(b"\n\0".as_ptr());
         }
         
         // Find the start of the nth argument
@@ -2783,7 +2758,6 @@ impl Drop for BashShell {
 #[no_mangle]
 pub extern "C" fn rust_bash_run() {
     unsafe {
-        serial_write(b"[BASH-DEBUG] Enter rust_bash_run\n\0".as_ptr());
         if let Some(ref mut shell) = BASH_SHELL {
             shell.run();
         } else {

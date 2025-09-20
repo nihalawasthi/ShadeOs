@@ -151,9 +151,7 @@ impl ProcessControlBlock {
     }
     
     pub fn add_memory_region(&mut self, region: MemoryRegion) {
-        unsafe { serial_write(b"[PROC-DEBUG] add_memory_region: before push\r\n\0".as_ptr()); }
         self.memory_regions.push(region);
-        unsafe { serial_write(b"[PROC-DEBUG] add_memory_region: after push\r\n\0".as_ptr()); }
     }
     
     pub fn check_memory_access(&self, addr: u64, access_type: u32) -> bool {
@@ -379,7 +377,6 @@ static mut PROCESS_MANAGER: Option<ProcessManager> = None;
 pub extern "C" fn rust_process_init() {
     unsafe {
         PROCESS_MANAGER = Some(ProcessManager::new());
-        serial_write(b"[PROCESS] Process manager initialized\n\0".as_ptr());
         
         // Create init process (PID 1)
         if let Some(ref mut pm) = PROCESS_MANAGER {

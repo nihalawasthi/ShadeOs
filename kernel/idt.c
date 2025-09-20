@@ -43,40 +43,34 @@ extern void* isr_stub_table[256];
 void idt_init() {    
     idt_pointer.limit = sizeof(struct idt_entry) * 256 - 1;
     idt_pointer.base = (uint64_t)&idt;
-    serial_write("[IDT] IDT pointer setup complete\n");
     
     memset(&idt, 0, sizeof(struct idt_entry) * 256);
-    serial_write("[IDT] IDT array cleared\n");
     
     for (int i = 0; i < 256; i++) {
         if (i == 0) {
-            serial_write("[IDT] Setting gate 0\n");
+            serial_write("");
         }
         if (i == 32) {
-            serial_write("[IDT] Setting gate 32 (timer)\n");
+            serial_write("");
         }
         if (i == 33) {
-            serial_write("[IDT] Setting gate 33 (keyboard)\n");
+            serial_write("");
         }
         idt_set_gate(i, (uint64_t)isr_stub_table[i], 0x08, 0x8E);
         if (i == 0) {
-            serial_write("[IDT] Gate 0 set\n");
+            serial_write("");
         }
         if (i == 32) {
-            serial_write("[IDT] Gate 32 set\n");
+            serial_write("");
         }
         if (i == 33) {
-            serial_write("[IDT] Gate 33 set\n");
+            serial_write("");
         }
     }
-    serial_write("[IDT] All gates set\n");
     // Set syscall gate (int 0x80) to syscall_entry
     extern void syscall_entry();
     idt_set_gate(0x80, (uint64_t)syscall_entry, 0x08, 0xEE);
-    
-    idt_flush((uint64_t)&idt_pointer);
-    
-    serial_write("[IDT] IDT initialization complete\n");
+    idt_flush((uint64_t)&idt_pointer);    
 }
 
 // Central interrupt handler

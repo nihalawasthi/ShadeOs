@@ -69,8 +69,6 @@ static void pci_enable_device(pci_device_t *dev) {
     uint32_t cmd_dword = pci_config_read_dword(dev->bus, dev->slot, dev->func, PCI_COMMAND & 0xFC);
     cmd_dword = (cmd_dword & 0xFFFF0000) | command;
     pci_config_write_dword(dev->bus, dev->slot, dev->func, PCI_COMMAND & 0xFC, cmd_dword);
-    
-    serial_write("[PCI] Device enabled\n");
 }
 
 static void pci_probe_bars(pci_device_t *dev) {
@@ -93,12 +91,6 @@ static void pci_probe_bars(pci_device_t *dev) {
         pci_config_write_dword(dev->bus, dev->slot, dev->func, bar_offset, bar_value);
         
         dev->bar[bar] = bar_value;
-        
-        if (bar_value & 1) {
-            serial_write("[PCI] I/O BAR found\n");
-        } else {
-            serial_write("[PCI] Memory BAR found\n");
-        }
     }
 }
 
@@ -123,38 +115,41 @@ static void pci_scan_device(uint8_t bus, uint8_t slot) {
     dev->irq = (pci_config_read_dword(bus, slot, 0, PCI_INTERRUPT_LINE & 0xFC) >> 0) & 0xFF;
     dev->device_id_registered = -1; // Initialize to invalid ID
     
-    serial_write("[PCI] Found device\n");
-    
     /* Probe BARs to get resource information */
     pci_probe_bars(dev);
-    
-    /* Enable the device */
     pci_enable_device(dev);
-    
-    // Just enumerate devices without registering them for now
-    
-    // Add memory barrier
+
+    // Check if this is a recognized device and print a detailed log if so.
+    // if (dev->vendor_id == 0x10EC && dev->device_id == 0x8139) {
+    //     char log_buf[128];
+    //     uint32_t io_base = dev->bar[0] & ~0x3; // I/O addresses are in BAR0 for RTL8139
+    //     snprintf(log_buf, sizeof(log_buf), "[rtl8139] net0: Found at %02x:%02x.%x, I/O at 0x%x, IRQ %d\n",
+    //              bus, slot, 0, io_base, dev->irq);
+    //     serial_write(log_buf);
+    // }
+    // You could add more `else if` blocks here for other supported devices (e.g., IDE controllers, sound cards).
+
     __asm__ volatile("" ::: "memory");
 }
 
 void pci_init(void) {
-    serial_write("[PCI] Starting PCI bus enumeration\n");
     pci_device_count = 0;
-    
-    /* Scan first bus only for now */
     for (uint8_t slot = 0; slot < 8; slot++) {
         pci_scan_device(0, slot);
-        // Small delay between scans
         for (volatile int i = 0; i < 10000; i++);
     }
-    
-    serial_write("[PCI] Enumeration complete\n");
-    
+
+    if (pci_device_count == 0) {
+        serial_write("[PCI] No devices found.\n");
+    } else {
+        char log_buf[64];
+        snprintf(log_buf, sizeof(log_buf), "[PCI] Found %d device(s).\n", pci_device_count);
+        serial_write(log_buf);
+    }
+        
     // Memory barrier before returning
     __asm__ volatile("mfence" ::: "memory");
     
-    // Run PCI test function to display discovered devices
-    // pci_test_devices();
 }
 
 /* This function was added to provide controlled access to a device's BARs. */

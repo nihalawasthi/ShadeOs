@@ -50,18 +50,17 @@ pub extern "C" fn init_heap() {
         let head = HEAP.0.as_mut_ptr() as *mut Block;
         let heap_base = HEAP.0.as_ptr() as usize;
         let heap_end = heap_base + HEAP_SIZE;
-        serial_write(b"[HEAP-DEBUG] heap_base: 0x\0".as_ptr());
-        serial_write_hex(heap_base as u64);
-        serial_write(b"\n\0".as_ptr());
-        serial_write(b"[HEAP-DEBUG] heap_end: 0x\0".as_ptr());
-        serial_write_hex(heap_end as u64);
-        serial_write(b"\n\0".as_ptr());
         (*head).magic = BLOCK_MAGIC;
         (*head).size = HEAP_SIZE - size_of::<Block>();
         (*head).is_free = true;
         (*head).next = null_mut();
         (*head).prev = null_mut();
         HEAP_HEAD = head;
+        serial_write(b"[MEM] Paging enabled, heap at 0x\0".as_ptr());
+        serial_write_hex(heap_base as u64);
+        serial_write(b"-0x\0".as_ptr());
+        serial_write_hex(heap_end as u64);
+        serial_write(b"\n\0".as_ptr());
     }
 }
 

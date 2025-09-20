@@ -29,6 +29,7 @@ void task_yield();
 void task_exit();
 void task_schedule();
 void timer_task_handler();
+void ipc_test();
 
 #ifdef __cplusplus
 extern "C" {

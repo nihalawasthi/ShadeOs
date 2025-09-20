@@ -224,9 +224,7 @@ static mut EXT2_FS: Ext2Fs = Ext2Fs {
 // Public interface functions
 pub fn ext2_init() {
     unsafe {
-        serial_write(b"[EXT2-RS] Initializing ext2 filesystem support\n\0".as_ptr());
         EXT2_FS = Ext2Fs::new();
-        serial_write(b"[EXT2-RS] ext2 filesystem support initialized\n\0".as_ptr());
     }
 }
 

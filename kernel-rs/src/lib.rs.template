@@ -282,10 +282,6 @@ fn panic(info: &PanicInfo) -> ! {
 // This function will be called from C
 #[no_mangle]
 pub extern "C" fn rust_entry_point() {
-    unsafe {
-        vga_print(b"[RUST] Hello from Rust!\n\0".as_ptr());
-        serial_write(b"[RUST] Hello from Rust!\n\0".as_ptr());
-    }
     keyboard::init(); // Initialize the Rust keyboard buffer
     rust_elf_init_dynamic_linking(); // Initialize dynamic linking system
     ext2::ext2_init(); // Initialize ext2 filesystem support

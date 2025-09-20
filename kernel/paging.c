@@ -24,8 +24,6 @@ static uint64_t get_pd_index(uint64_t addr)   { return (addr >> 21) & 0x1FF; }
 static uint64_t get_pt_index(uint64_t addr)   { return (addr >> 12) & 0x1FF; }
 
 void paging_init() {
-    vga_print("[BOOT] Initializing paging...\n");
-    serial_write("[BOOT] Initializing paging...\n");
     pml4_table = (uint64_t*)alloc_page();
     memset(pml4_table, 0, PAGE_SIZE);
 
@@ -38,21 +36,13 @@ void paging_init() {
         for (int i = 256; i < 512; i++) {
             test_user_pml4[i] = pml4_table[i];
         }
-        serial_write("[PAGING]: kernel PML4 copy before paging enabled OK\n");
     }
-    // Map all physical memory from 1MB to 16MB
-    // Identity map the first 16MB of physical memory. This is a simple and robust
-    // way to ensure the kernel code, VGA buffer, and initial heap are all
-    // accessible after enabling paging.
     for (uint64_t addr = 0; addr < 0x1000000; addr += PAGE_SIZE) { // 16MB
         map_page(addr, addr, PAGE_PRESENT | PAGE_RW);
     }
-    serial_write("[PAGING] Identity mapped first 16MB\n");
 
     // Load new PML4
     __asm__ volatile("mov %0, %%cr3" : : "r"(pml4_table));
-    vga_print("[BOOT] Paging enabled\n");
-    serial_write("[PAGING] paging_init: done\n");
 }
 
 void map_page(uint64_t virt_addr, uint64_t phys_addr, uint64_t flags) {

@@ -47,7 +47,7 @@ impl FileEntry {
             }
             addr >>= 4;
         }
-        unsafe { serial_write(buf.as_ptr()); }
+        // unsafe { serial_write(buf.as_ptr()); }
         entry
     }
     
@@ -68,7 +68,7 @@ impl FileEntry {
             }
             addr >>= 4;
         }
-        unsafe { serial_write(buf.as_ptr()); }
+        // unsafe { serial_write(buf.as_ptr()); }
         entry
     }
 }
@@ -77,9 +77,7 @@ static mut ROOT_FS: Option<FileEntry> = None;
 
 pub fn init() {
     unsafe {
-        serial_write(b"[VFS] Initializing virtual file system\n\0".as_ptr());
         ROOT_FS = Some(FileEntry::new_directory("/".to_string()));
-        serial_write(b"[VFS] Virtual file system initialized\n\0".as_ptr());
     }
 }
 
@@ -212,15 +210,11 @@ pub fn write_file(path: *const u8, buf: *const u8, len: u64) -> u64 {
     if let Some(entry) = find_entry(path) {
         match entry.file_type {
             FileType::Regular => {
-                unsafe { serial_write(b"[VFS-DEBUG] write_file: clearing data\r\n\0".as_ptr()); }
                 entry.data.clear();
-                unsafe { serial_write(b"[VFS-DEBUG] write_file: reserving data\r\n\0".as_ptr()); }
                 entry.data.reserve(len as usize);
-                unsafe { serial_write(b"[VFS-DEBUG] write_file: pushing data\r\n\0".as_ptr()); }
                 for i in 0..len as usize {
                     entry.data.push(unsafe { *buf.add(i) });
                 }
-                unsafe { serial_write(b"[VFS-DEBUG] write_file: done\r\n\0".as_ptr()); }
                 len
             },
             FileType::Directory => 0, // Can't write to directory

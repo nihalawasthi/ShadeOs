@@ -32,8 +32,6 @@ static void gdt_set_gate(int num, uint32_t base, uint32_t limit, uint8_t access,
 }
 
 void gdt_init() {
-    serial_write("[GDT] Starting GDT initialization\n");
-    
     gdt_pointer.limit = (sizeof(struct gdt_entry) * 5) - 1;
     gdt_pointer.base = (uint64_t)&gdt;
     gdt_set_gate(0, 0, 0, 0, 0);                // Null segment
@@ -42,8 +40,6 @@ void gdt_init() {
     gdt_set_gate(3, 0, 0xFFFFFFFF, 0xFA, 0xAF); // User code segment
     gdt_set_gate(4, 0, 0xFFFFFFFF, 0xF2, 0xCF); // User data segment
     gdt_flush((uint64_t)&gdt_pointer);
-    serial_write("[GDT] gdt_flush completed\n");    
-    serial_write("[GDT] GDT initialization complete\n");
 }
 
 // Export selectors for user mode

@@ -511,11 +511,8 @@ pub extern "C" fn rust_elf_load(path_ptr: *const u8) -> i32 {
 // Initialize the dynamic linking system
 pub extern "C" fn rust_elf_init_dynamic_linking() {
     unsafe {
-        serial_write(b"[ELF] Initializing dynamic linking system\n\0".as_ptr());
-        // Initialize global symbol table
         GLOBAL_SYMBOLS.clear();
         LOADED_LIBRARIES.clear();
-        serial_write(b"[ELF] Dynamic linking system initialized\n\0".as_ptr());
     }
 }
 

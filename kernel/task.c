@@ -5,6 +5,8 @@
 #include "gdt.h"
 #include "timer.h"
 #include "paging.h"
+#include "syscall.h" // For sys_pipe, sys_read, sys_write, sys_close
+#include <string.h>  // For strlen
 
 // FFI declarations for Rust tasking
 extern void rust_task_init();
@@ -99,8 +101,58 @@ void scheduler_sleep(void* wait_channel) {
 }
 
 void scheduler_wakeup(void* wait_channel) {
-    // In a real implementation, you'd wake up tasks from the wait queue
-    // associated with wait_channel. For now, just schedule.
     (void)wait_channel;
     task_schedule();
 }
+
+// static int pipe_fds[2];
+// void ipc_writer_task() {
+//     const char* message = "IPC pipe test from kernel OK";
+//     serial_write("[IPC Test - Writer] Task started.\n");
+//     syscall1(SYS_CLOSE, pipe_fds[0]);
+//     serial_write("[IPC Test - Writer] Writing message...\n");
+//     int bytes_written = syscall3(SYS_WRITE, pipe_fds[1], (uint64_t)message, strlen(message) + 1);
+//     if (bytes_written > 0) {
+//         serial_write("[IPC Test - Writer] Write successful.\n");
+//     } else {
+//         serial_write("[IPC Test - Writer] Write FAILED.\n");
+//     }
+//     syscall1(SYS_CLOSE, pipe_fds[1]);
+//     serial_write("[IPC Test - Writer] Task finished.\n");
+// }
+
+// void ipc_reader_task() {
+//     char buffer[100] = {0};
+//     const char* expected_message = "IPC pipe test from kernel OK";
+//     serial_write("[IPC Test - Reader] Task started.\n");
+//     syscall1(SYS_CLOSE, pipe_fds[1]);
+//     serial_write("[IPC Test - Reader] Waiting to read from pipe (this should block)...\n");
+//     int bytes_read = syscall3(SYS_READ, pipe_fds[0], (uint64_t)buffer, sizeof(buffer) - 1);
+//     if (bytes_read > 0) {
+//         serial_write("[IPC Test - Reader] Read successful. Verifying message...\n");
+//         if (strcmp(buffer, expected_message) == 0) {
+//             serial_write("--- Kernel IPC Test: PASSED ---\n");
+//         } else {
+//             serial_write("--- Kernel IPC Test: FAILED (Message mismatch) ---\n");
+//         }
+//     } else {
+//         serial_write("--- Kernel IPC Test: FAILED (Read error) ---\n");
+//     }
+//     syscall1(SYS_CLOSE, pipe_fds[0]);
+//     serial_write("[IPC Test - Reader] Task finished.\n");
+// }
+
+// void ipc_test() {
+//     serial_write("\n--- Starting Kernel IPC Pipe Test ---\n");
+
+//     if (syscall1(SYS_PIPE, (uint64_t)pipe_fds) == -1) {
+//         serial_write("[IPC Test] FAILED: Could not create pipe.\n");
+//         return;
+//     }
+//     rust_task_create(ipc_writer_task);
+//     rust_task_create(ipc_reader_task);
+//     serial_write("[IPC Test] Writer and Reader tasks created. Yielding CPU...\n");
+
+//     // Force a context switch to allow the new tasks to run.
+//     syscall0(SYS_SCHED_YIELD);
+// }

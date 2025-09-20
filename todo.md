@@ -67,17 +67,13 @@
 - Performance benchmark plan added (docs/performance.md)
 
 ## 🔄 IN PROGRESS TASKS (0/16)
-
-*All previously in-progress tasks have been completed*
-
-## ❌ PENDING TASKS (8/16)
-
-### 8. Inter-Process Communication (IPC) ❌ NOT STARTED
-- **NEEDED**: Pipes and named pipes (FIFOs)
-- **NEEDED**: Shared memory segments
+### 8. Inter-Process Communication (IPC) 🔄 IN PROGRESS
+- **NEEDED**: Anonymous Pipes
+- **NEEDED**: Named pipes (FIFOs)
+- **NEEDED**: Shared memory segments (shmget, shmat, shmctl)
+- **NEEDED**: Signals and signal handling (kill, sigaction)
 - **NEEDED**: Message queues
 - **NEEDED**: Semaphores and mutexes
-- **NEEDED**: Signals and signal handling
 
 ### 9. Security & Access Control ❌ NOT STARTED
 - **NEEDED**: User authentication system
@@ -131,8 +127,8 @@
 ## 📊 PROGRESS SUMMARY
 
 - **Completed**: 8/16 tasks (50.00%)
-- **In Progress**: 0/16 tasks (0%)
-- **Pending**: 8/16 tasks (50.00%)
+- **In Progress**: 1/16 tasks (6.25%)
+- **Pending**: 7/16 tasks (43.75%)
 
 ## 🎯 NEXT PRIORITIES
 

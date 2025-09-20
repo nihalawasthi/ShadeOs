@@ -6,14 +6,22 @@
 #include "keyboard.h"
 #include "http.h"
 #include "serial.h"
-#include "vfs.h" // Keep this for shell, but its implementation will change
+#include "vfs.h"
 #include "rtl8139.h"
 #include "net.h"
 #include "task.h"
 #include "syscall.h"
 #include "blockdev.h" // Needed for blockdev_get in Rust FFI
 #include <stdbool.h>
+#include <string.h>
+
 typedef unsigned int u32;
+typedef unsigned char u8;
+
+// FFI declarations for the kernel's internal socket API
+extern int sock_socket(void);
+extern int sock_connect(int s, const u8* ip, unsigned short port);
+extern int sock_close(int s);
 
 // Declare the Rust entry point function
 extern void rust_entry_point();
@@ -32,35 +40,35 @@ extern void rust_process_list();
 extern void init_heap();
 
 // Minimal valid ELF64 binary (hello world stub, 128 bytes)
-static const unsigned char test_elf_stub[128] = {
-    0x7F, 'E', 'L', 'F', // Magic
-    2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 64-bit, LSB, version, padding
-    2, 0, // ET_EXEC
-    0x3E, 0x00, // EM_X86_64
-    1, 0, 0, 0, // EV_CURRENT
-    0x78, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, // e_entry (0x400078)
-    0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // e_phoff (64)
-    0, 0, 0, 0, 0, 0, 0, 0, // e_shoff
-    0, 0, 0, 0, // e_flags
-    0x40, 0x00, // e_ehsize (64)
-    0x38, 0x00, // e_phentsize (56)
-    0x01, 0x00, // e_phnum (1)
-    0, 0, // e_shentsize
-    0, 0, // e_shnum
-    0, 0, // e_shstrndx
-    // Program header (PT_LOAD)
-    1, 0, 0, 0, // p_type (PT_LOAD)
-    5, 0, 0, 0, // p_flags (R+X)
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // p_offset
-    0x78, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, // p_vaddr (0x400078)
-    0x78, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, // p_paddr
-    0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // p_filesz (8)
-    0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // p_memsz (8)
-    0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // p_align (0x1000)
-    // Code at 0x400078 (just ret)
-    0xC3, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, // ret + padding
-    // Padding to 128 bytes
-};
+// static const unsigned char test_elf_stub[128] = {
+//     0x7F, 'E', 'L', 'F', // Magic
+//     2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 64-bit, LSB, version, padding
+//     2, 0, // ET_EXEC
+//     0x3E, 0x00, // EM_X86_64
+//     1, 0, 0, 0, // EV_CURRENT
+//     0x78, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, // e_entry (0x400078)
+//     0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // e_phoff (64)
+//     0, 0, 0, 0, 0, 0, 0, 0, // e_shoff
+//     0, 0, 0, 0, // e_flags
+//     0x40, 0x00, // e_ehsize (64)
+//     0x38, 0x00, // e_phentsize (56)
+//     0x01, 0x00, // e_phnum (1)
+//     0, 0, // e_shentsize
+//     0, 0, // e_shnum
+//     0, 0, // e_shstrndx
+//     // Program header (PT_LOAD)
+//     1, 0, 0, 0, // p_type (PT_LOAD)
+//     5, 0, 0, 0, // p_flags (R+X)
+//     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // p_offset
+//     0x78, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, // p_vaddr (0x400078)
+//     0x78, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, // p_paddr
+//     0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // p_filesz (8)
+//     0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // p_memsz (8)
+//     0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // p_align (0x1000)
+//     // Code at 0x400078 (just ret)
+//     0xC3, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, // ret + padding
+//     // Padding to 128 bytes
+// };
 
 // PIC initialization function
 void pic_init() {
@@ -161,8 +169,6 @@ void print_dec64(unsigned long val) {
 }
 
 void kernel_main(uint64_t mb2_info_ptr) {
-    serial_write("[DEBUG] Entering kernel_main\n");
-    // VGA direct print (always enabled)
     volatile uint16_t* vga = (uint16_t*)0xB8000;
     for (int i = 0; i < 80 * 25; i++) vga[i] = 0x0F20;
     const char* msg = "KERNEL STARTED - 64BIT MODE WORKING!";
@@ -170,10 +176,7 @@ void kernel_main(uint64_t mb2_info_ptr) {
 
     // VGA init/clear
     rust_vga_clear();
-    rust_vga_set_color(0x0A);
-    rust_vga_print("ShadeOS v0.1\n");
-    rust_vga_set_color(0x0F);
-    rust_vga_print("======================================\n\n");
+    serial_write("[KERNEL] Initializing ShadeOS v0.1\n");
 
     // Print Multiboot2 info pointer
     for (int i = 60; i >= 0; i -= 4) {
@@ -203,35 +206,21 @@ void kernel_main(uint64_t mb2_info_ptr) {
 
     // Paging
     paging_init();
-
     // Heap
-    // heap_init(); // Remove C heap init
-    init_heap();    // Call Rust heap init
-
+    init_heap();
     // Timer
-    timer_init(100); // 100 Hz
-
+    timer_init(100);
     // Serial
     serial_init();
-    rust_vga_print("[BOOT] paging, heap allocator, PIT timer, serial port (COM1) initialized (100 Hz)\n");
-    serial_write("[BOOT] paging, heap allocator, PIT timer, serial port (COM1) initialized (100 Hz)\n");
-
     // GDT/IDT
     gdt_init();
-    idt_init();
-    
+    idt_init();    
     // PIC
     pic_init();
-
     // Keyboard
     initialize_keyboard();
-    rust_vga_print("[BOOT] GDT & IDT, PIC, Keyboard driver initialized\n");
-    
-    rust_vga_print("[BOOT] Kernel loaded successfully!\n");
-
-    // Block Device (for Rust VFS)
-    blockdev_init(); // Initialize the C ramdisk block device
-    rust_vga_print("[BOOT] Block Devices initialized.\n");
+    // Block Devices
+    blockdev_init();
 
     // Device framework + Network devices
     extern void device_framework_init(void);
@@ -248,50 +237,22 @@ void kernel_main(uint64_t mb2_info_ptr) {
     // PCI bus
     extern void pci_init(void);
     pci_init();
-    serial_write("[DEBUG] PCI init completed successfully\n");
-    rust_vga_print("[DEBUG] PCI init completed successfully\n");
-    
-    // Add memory barrier to prevent compiler optimization issues
     __asm__ volatile("" ::: "memory");
     
-    serial_write("[DEBUG] About to call rtl8139_init\n");
-
     // Network
     rtl8139_init();
-    serial_write("[BOOT] RTL8139 network driver initialized\n");
     struct ip_addr ip = { {10, 0, 2, 15} };
     net_init(ip);
-    rust_vga_print("[BOOT] Network stack initialized\n");
-
-    // TCP Test: Attempt to fetch a page from the QEMU host
-    serial_write("[TEST] Starting TCP HTTP GET test...\n");
-    // uint8_t qemu_host_ip[4] = {10, 0, 2, 2};
-    // http_get(qemu_host_ip, "10.0.2.2", "/");
-    serial_write("[TEST] TCP test finished.\n");
-
     // Multitasking    
     task_init();
-    rust_vga_print("[BOOT] Task system initialized\n");
-    serial_write("[BOOT] Task system initialized\n");
-
     // VFS
     rust_vfs_init();
-    rust_vga_print("[BOOT] VFS initialized\n");
-    serial_write("[BOOT] VFS initialized\n");
-
     // Process management
     rust_process_init();
-    rust_vga_print("[BOOT] Process management initialized\n");
-    serial_write("[BOOT] Process management initialized\n");
-
     // System calls  
     rust_syscall_init();
-    rust_vga_print("[BOOT] System call interface initialized\n");
-    serial_write("[BOOT] System call interface initialized\n");
 
     // Create /bin and other directories
-    rust_vga_print("[BOOT] Setting up filesystem structure...\n");
-    serial_write("[BOOT] Setting up filesystem structure...\n");
     rust_vfs_mkdir("/bin\0");
     rust_vfs_mkdir("/usr\0");
     rust_vfs_mkdir("/usr/bin\0");
@@ -309,7 +270,6 @@ void kernel_main(uint64_t mb2_info_ptr) {
     // Create bash binary
     rust_vfs_create_file("/bin/bash\0");
     static const char bash_binary[] = "/bin/bash\0";
-    serial_write("[BOOT] Creating bash binary...\n");
     static const unsigned char test_elf_stub[128] = {
         0x7F, 'E', 'L', 'F', 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         2, 0, 0x3E, 0x00, 1, 0, 0, 0, 0x78, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -321,7 +281,7 @@ void kernel_main(uint64_t mb2_info_ptr) {
         0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC3, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90
     };
     uint64_t vfs_ret = rust_vfs_write(bash_binary, test_elf_stub, sizeof(test_elf_stub));
-    serial_write("[BOOT] Bash binary created\n");
+    serial_write("[VFS] Initial ramdisk mounted, bash binary created.\n");
 
     // Create some basic files
     rust_vfs_create_file("/etc/passwd\0");
@@ -331,9 +291,6 @@ void kernel_main(uint64_t mb2_info_ptr) {
 
     // Syscalls
     syscall_init();
-    rust_vga_print("[BOOT] Syscalls initialized\n");
-    serial_write("[BOOT] Syscalls initialized\n");
-
     // Initialize Rust components
     rust_entry_point();
 
@@ -342,17 +299,19 @@ void kernel_main(uint64_t mb2_info_ptr) {
     rust_keyboard_clear_buffer();
 
     // Initialize bash shell
-    rust_vga_print("[BOOT] Initializing Bash shell...\n");
-    serial_write("[BOOT] Initializing Bash shell...\n");
+    serial_write("[CORE] Syscalls and Scheduler initialized.\n");
     rust_bash_init();
 
-    // Start the bash shell directly
-    // rust_vga_print("[BOOT] Starting Bash shell...\n");
-    //serial_write("[BOOT] Starting Bash shell.\n");
+    // ipc_test();
+
     rust_bash_run();
-    rust_vga_set_color(0x0E);
-    rust_vga_print("Welcome to ShadeOS - Linux-Compatible Kernel\n");
-    rust_vga_print("Bash-compatible shell ready!\n");
-    rust_vga_set_color(0x0F);
     rust_vga_print("\n");
 }
+
+
+
+// TCP Test: Attempt to fetch a page from the QEMU host
+// serial_write("[TEST] Starting TCP HTTP GET test...\n");
+// uint8_t qemu_host_ip[4] = {10, 0, 2, 2};
+// http_get(qemu_host_ip, "10.0.2.2", "/");
+// serial_write("[TEST] TCP test finished.\n");

@@ -62,6 +62,7 @@ $(RUST_LIB):
 	@echo 'codegen-units = 1' >> kernel-rs/Cargo.toml
 	@echo '' >> kernel-rs/Cargo.toml
 	@echo '[dependencies]' >> kernel-rs/Cargo.toml
+	@echo 'spin = "0.9.8"' >> kernel-rs/Cargo.toml
 	@mkdir -p kernel-rs/src
 	@if [ ! -f kernel-rs/src/lib.rs ]; then \
 		cp kernel-rs/src/lib.rs.template kernel-rs/src/lib.rs; \
