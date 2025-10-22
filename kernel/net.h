@@ -23,4 +23,7 @@ int net_ipv4_send(const uint8_t dst_ip[4], uint8_t proto, const void *payload, i
 int udp_send(struct ip_addr dest, uint16_t port, const void* data, int len);
 int udp_poll_recv(struct ip_addr* src, uint16_t* port, void* buf, int maxlen);
 
+/* Periodic NIC RX poller */
+void net_poll_rx(void);
+
 #endif

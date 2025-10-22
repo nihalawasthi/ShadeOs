@@ -13,7 +13,6 @@
 #include "syscall.h"
 #include "blockdev.h" // Needed for blockdev_get in Rust FFI
 #include <stdbool.h>
-#include <string.h>
 
 typedef unsigned int u32;
 typedef unsigned char u8;
@@ -241,12 +240,33 @@ void kernel_main(uint64_t mb2_info_ptr) {
     
     // Network
     rtl8139_init();
-    struct ip_addr ip = { {10, 0, 2, 15} };
+    struct ip_addr ip = (struct ip_addr){{10, 0, 2, 15}};
     net_init(ip);
+    /* Periodically poll NIC RX to feed network stack */
+    extern void net_poll_rx(void);
+    timer_register_periodic(net_poll_rx, 10);
     // Multitasking    
     task_init();
     // VFS
     rust_vfs_init();
+
+    // Security/ACL init
+    extern void sec_init(void);
+    extern int acl_init(void);
+    sec_init();
+    acl_init();
+
+    // Set basic ACLs for system paths
+    extern int sec_set_acl(const char* path, unsigned int owner, unsigned int group, unsigned short mode);
+    sec_set_acl("/\0", 0, 0, 0755);
+    sec_set_acl("/etc\0", 0, 0, 0755);
+    sec_set_acl("/bin\0", 0, 0, 0755);
+    sec_set_acl("/usr\0", 0, 0, 0755);
+
+    // Service manager
+    extern int svc_init(void);
+    svc_init();
+
     // Process management
     rust_process_init();
     // System calls  
@@ -269,6 +289,8 @@ void kernel_main(uint64_t mb2_info_ptr) {
 
     // Create bash binary
     rust_vfs_create_file("/bin/bash\0");
+    extern int sec_set_acl(const char* path, unsigned int owner, unsigned int group, unsigned short mode);
+    sec_set_acl("/bin/bash\0", 0, 0, 0755);
     static const char bash_binary[] = "/bin/bash\0";
     static const unsigned char test_elf_stub[128] = {
         0x7F, 'E', 'L', 'F', 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -285,8 +307,10 @@ void kernel_main(uint64_t mb2_info_ptr) {
 
     // Create some basic files
     rust_vfs_create_file("/etc/passwd\0");
+    sec_set_acl("/etc/passwd\0", 0, 0, 0644);
     rust_vfs_write("/etc/passwd\0", "root:x:0:0:root:/root:/bin/bash\n\0", 32);
     rust_vfs_create_file("/etc/hostname\0");
+    sec_set_acl("/etc/hostname\0", 0, 0, 0644);
     rust_vfs_write("/etc/hostname\0", "shadeos\n\0", 9);
 
     // Syscalls
@@ -303,15 +327,19 @@ void kernel_main(uint64_t mb2_info_ptr) {
     rust_bash_init();
 
     // ipc_test();
+    // Automated ping test before launching shell
+    serial_write("[AUTO-TEST] Running ping to 10.0.2.2...\n");
+    extern int icmp_send_echo_request(const uint8_t dst_ip[4], uint16_t id, uint16_t seq, const void *data, int dlen);
+    uint8_t test_ip[4] = {10, 0, 2, 2};
+    int ping_result = icmp_send_echo_request(test_ip, 0x1234, 1, NULL, 0);
+    serial_write("[AUTO-TEST] icmp_send_echo_request returned: ");
+    serial_write_dec("", ping_result);
+    serial_write("\n");
 
     rust_bash_run();
+    // serial_write("[TEST] Starting TCP HTTP GET test...\n");
+    // serial_write("[TEST] TCP test finished.\n");
     rust_vga_print("\n");
 }
 
 
-
-// TCP Test: Attempt to fetch a page from the QEMU host
-// serial_write("[TEST] Starting TCP HTTP GET test...\n");
-// uint8_t qemu_host_ip[4] = {10, 0, 2, 2};
-// http_get(qemu_host_ip, "10.0.2.2", "/");
-// serial_write("[TEST] TCP test finished.\n");

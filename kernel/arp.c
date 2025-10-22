@@ -2,6 +2,7 @@
 #include "endian.h"
 #include "net.h"
 #include "kernel.h"
+#include "serial.h"
 #include <stdint.h>
 
 /* Replace these with your kernel's time and send helpers */
@@ -60,9 +61,22 @@ static void arp_table_insert(const uint8_t ip[4], const uint8_t mac[6]) {
 }
 
 int arp_resolve_sync(const uint8_t ip[4], uint8_t out_mac[6]) {
+    // Hardcoded ARP entry for QEMU default gateway 10.0.2.2
+    if (ip[0] == 10 && ip[1] == 0 && ip[2] == 2 && ip[3] == 2) {
+        serial_write("[ARP] Hardcoded MAC for 10.0.2.2\n");
+        out_mac[0] = 0x52;
+        out_mac[1] = 0x54;
+        out_mac[2] = 0x00;
+        out_mac[3] = 0x12;
+        out_mac[4] = 0x34;
+        out_mac[5] = 0x56;
+        return 0;
+    }
     int i;
     for (i = 0; i < ARP_TABLE_SIZE; ++i) {
         if (arp_table[i].valid && memcmp(arp_table[i].ip, ip, 4) == 0) {
+            serial_write("[ARP] Table hit for IP: ");
+            for (int j = 0; j < 4; ++j) serial_write_dec("", ip[j]), serial_write(j < 3 ? "." : "\n");
             memcpy(out_mac, arp_table[i].mac, 6);
             return 0;
         }
@@ -83,6 +97,8 @@ int arp_resolve_sync(const uint8_t ip[4], uint8_t out_mac[6]) {
     memcpy(req.tpa, ip, 4);
     /* Broadcast */
     uint8_t bcast[6] = {0xff,0xff,0xff,0xff,0xff,0xff};
+    serial_write("[ARP] Sending ARP request for IP: ");
+    for (int j = 0; j < 4; ++j) serial_write_dec("", ip[j]), serial_write(j < 3 ? "." : "\n");
     net_send_eth_frame(bcast, 0x0806, &req, sizeof(req));
     return -1;
 }

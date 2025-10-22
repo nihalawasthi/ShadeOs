@@ -23,6 +23,39 @@ static uint16_t ip_checksum(const void* vdata, size_t length) {
     return (uint16_t)~acc;
 }
 
+/* incremental checksum helpers for TCP pseudo-header + segment */
+static uint32_t csum_add(uint32_t sum, const uint8_t *data, size_t len) {
+    while (len > 1) {
+        sum += ((uint16_t)data[0] << 8) | data[1];
+        data += 2; len -= 2;
+    }
+    if (len) sum += ((uint16_t)data[0] << 8);
+    return sum;
+}
+static uint16_t csum_finalize(uint32_t sum) {
+    while (sum >> 16) sum = (sum & 0xFFFF) + (sum >> 16);
+    return (uint16_t)~sum;
+}
+static uint16_t tcp_checksum(const uint8_t src[4], const uint8_t dst[4], uint8_t *tcp, int tcp_len) {
+    /* checksum field at offset 16 must be zeroed for computation */
+    uint8_t saved_csum_hi = tcp[16];
+    uint8_t saved_csum_lo = tcp[17];
+    tcp[16] = tcp[17] = 0;
+
+    uint32_t sum = 0;
+    sum = csum_add(sum, src, 4);
+    sum = csum_add(sum, dst, 4);
+    uint8_t ph[4] = {0, 6 /* TCP */, (uint8_t)(tcp_len >> 8), (uint8_t)(tcp_len & 0xFF)};
+    sum = csum_add(sum, ph, 4);
+    sum = csum_add(sum, tcp, (size_t)tcp_len);
+    uint16_t csum = csum_finalize(sum);
+
+    /* restore (not necessary since caller will set) */
+    tcp[16] = saved_csum_hi;
+    tcp[17] = saved_csum_lo;
+    return csum;
+}
+
 void net_get_local_ip(uint8_t out_ip[4]) { memcpy(out_ip, local_ip_s.addr, 4); }
 void net_get_local_mac(uint8_t out_mac[6]) { memcpy(out_mac, local_mac_s.addr, 6); }
 
@@ -79,7 +112,15 @@ int net_ipv4_send(const uint8_t dst_ip[4], uint8_t proto, const void *payload, i
     memcpy(buf+ip_off+16, dst_ip, 4);
     uint16_t csum = ip_checksum(buf+ip_off, 20);
     buf[ip_off+10] = (uint8_t)(csum >> 8); buf[ip_off+11] = (uint8_t)(csum & 0xFF);
+
+    /* Copy payload and fill TCP checksum if needed */
     memcpy(buf+20, payload, payload_len);
+    if (proto == 6 /* TCP */ && payload_len >= 20) {
+        /* set checksum over pseudo-header + TCP seg; write into buf+20 offset 16 */
+        uint16_t tcs = tcp_checksum(local_ip_s.addr, dst_ip, (uint8_t*)(buf+20), payload_len);
+        buf[20 + 16] = (uint8_t)(tcs >> 8);
+        buf[20 + 17] = (uint8_t)(tcs & 0xFF);
+    }
     return net_send_eth_frame(mac, 0x0800, buf, 20 + payload_len);
 }
 
@@ -144,22 +185,56 @@ int udp_poll_recv(struct ip_addr* src, uint16_t* port, void* buf, int maxlen) {
 /* RX entry point from NIC driver */
 void net_input_eth_frame(const uint8_t *frame, int len) {
     if (len < 14) return;
+
+    /* Filter destination MAC: accept our MAC or broadcast */
+    uint8_t dst_mac[6];
+    memcpy(dst_mac, frame + 0, 6);
+    uint8_t bcast[6] = {0xff,0xff,0xff,0xff,0xff,0xff};
+    if (memcmp(dst_mac, bcast, 6) != 0) {
+        if (memcmp(dst_mac, local_mac_s.addr, 6) != 0) {
+            /* Not for us */
+            return;
+        }
+    }
+
     uint16_t ethertype = (uint16_t)((frame[12] << 8) | frame[13]);
     const uint8_t *payload = frame + 14;
     int payload_len = len - 14;
+
     if (ethertype == 0x0806) { /* ARP */
         arp_handle_frame(payload, payload_len);
         return;
     } else if (ethertype == 0x0800) { /* IPv4 */
         if (payload_len < 20) return;
+
+        /* Verify IPv4 header checksum and IHL */
         uint8_t ihl = payload[0] & 0x0f;
+        if (ihl < 5) return; /* invalid header length */
         int ip_hdr_len = ihl * 4;
         if (payload_len < ip_hdr_len) return;
+        uint16_t saved = (uint16_t)((payload[10] << 8) | payload[11]);
+        uint8_t iphdr_copy[60]; /* max header size if options present */
+        if (ip_hdr_len > (int)sizeof(iphdr_copy)) return; /* oversize */
+        memcpy(iphdr_copy, payload, ip_hdr_len);
+        iphdr_copy[10] = iphdr_copy[11] = 0;
+        if (ip_checksum(iphdr_copy, (size_t)ip_hdr_len) != saved) {
+            /* bad header checksum */
+            return;
+        }
+
         uint8_t proto = payload[9];
         const uint8_t *src_ip = payload + 12;
         const uint8_t *dst_ip = payload + 16;
+
+        /* Filter on destination IP: accept our IP or broadcast 255.255.255.255 */
+        uint8_t bcast_ip[4] = {255,255,255,255};
+        if (memcmp(dst_ip, local_ip_s.addr, 4) != 0 && memcmp(dst_ip, bcast_ip, 4) != 0) {
+            return;
+        }
+
         const uint8_t *ip_payload = payload + ip_hdr_len;
         int ip_payload_len = payload_len - ip_hdr_len;
+
         if (proto == 1) { /* ICMP */
             icmp_handle_ipv4(src_ip, ip_payload, ip_payload_len);
         } else if (proto == 17) { /* UDP */
@@ -168,11 +243,30 @@ void net_input_eth_frame(const uint8_t *frame, int len) {
                 const uint8_t *udp_data = ip_payload + 8;
                 int udp_len = ((ip_payload[4] << 8) | ip_payload[5]) - 8;
                 if (udp_len > ip_payload_len - 8) udp_len = ip_payload_len - 8;
-                udp_q_push(src_ip, src_port, udp_data, udp_len);
+                if (udp_len > 0) {
+                    udp_q_push(src_ip, src_port, udp_data, udp_len);
+                }
             }
-        } else if (proto == 6) {
-            /* TCP */
+        } else if (proto == 6) { /* TCP */
+            /* Validate TCP checksum over pseudo-header */
+            if (ip_payload_len < 20) return;
+            uint16_t received_csum = ((uint16_t)ip_payload[16] << 8) | ip_payload[17];
+            uint16_t calculated_csum = tcp_checksum((const uint8_t*)src_ip,
+                                                  (const uint8_t*)dst_ip,
+                                                  (uint8_t*)ip_payload, ip_payload_len);
+            if (calculated_csum != received_csum) {
+                return; /* bad TCP checksum */
+            }
             tcp_input_ipv4(payload, ip_hdr_len, ip_payload, ip_payload_len);
         }
+    }
+}
+
+/* Periodic RX poller: drain NIC receive ring and feed stack */
+void net_poll_rx(void) {
+    uint8_t buf[2048];
+    int len;
+    while ((len = rtl8139_poll_recv(buf, (int)sizeof(buf))) > 0) {
+        net_input_eth_frame(buf, len);
     }
 }

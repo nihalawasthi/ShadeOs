@@ -147,8 +147,8 @@ void pci_init(void) {
         serial_write(log_buf);
     }
         
-    // Memory barrier before returning
-    __asm__ volatile("mfence" ::: "memory");
+    // Memory barrier before returning (avoid SSE-only mfence)
+    __asm__ volatile("" ::: "memory");
     
 }
 

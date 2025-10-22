@@ -2,7 +2,7 @@
 #include "endian.h"
 #include "net.h"
 #include <stdint.h>
-#include "heap.h"
+#include "serial.h"
 
 /* External helper provided by net.c */
 extern int net_ipv4_send(const uint8_t dst_ip[4], uint8_t proto, const void *payload, int payload_len);
@@ -56,7 +56,9 @@ void icmp_handle_ipv4(const uint8_t src_ip[4], const uint8_t *icmp_payload, int 
 
 int icmp_send_echo_request(const uint8_t dst_ip[4], uint16_t id, uint16_t seq, const void *data, int dlen) {
     int icmp_len = (int)sizeof(struct icmp_hdr) + dlen;
+    serial_write_hex("icmp len", icmp_len);
     uint8_t *buf = (uint8_t*)kmalloc(icmp_len);
+    serial_write_hex("buf", (unsigned long)buf);
     if (!buf) return -1;
     struct icmp_hdr *ih = (struct icmp_hdr *)buf;
     ih->type = 8;

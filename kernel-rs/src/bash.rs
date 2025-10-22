@@ -684,7 +684,7 @@ impl BashShell {
             b"newgrp" => self.cmd_newgrp_heap(args_slice, argc),
             b"chgrp" => self.cmd_chgrp_heap(args_slice, argc),
             b"umask" => self.cmd_umask_heap(args_slice, argc),
-            b"test" => self.cmd_test_heap(args_slice, argc),
+            b"test" => self.cmd_test_http(),
             b"[" => self.cmd_test_heap(args_slice, argc),
             b"true" => self.cmd_true(),
             b"false" => self.cmd_false(),
@@ -822,7 +822,24 @@ impl BashShell {
         print_str(b"Goodbye!\n");
         self.last_exit_code = exit_code;
     }
-    
+    fn cmd_test_http(&mut self) {
+        let url = "http://www.google.com\0";
+        // allocate buffer in Rust and pass pointer to C http_get helper
+        let mut out = vec![0u8; 8192];
+        unsafe {
+            let ret = http_get(url.as_ptr(), out.as_mut_ptr(), out.len() as i32);
+            if ret > 0 {
+                print_str(b"HTTP GET successful, response:\n");
+                for i in 0..ret as usize {
+                    print_char(out[i]);
+                }
+                print_str(b"\n");
+            } else {
+                print_str(b"HTTP GET failed\n");
+            }
+        }
+        self.last_exit_code = 0;
+    }
     fn cmd_cd_heap(&mut self, args_buffer: &[u8], argc: usize) {
         let path = if argc > 1 {
             self.get_arg_heap(args_buffer, 1)

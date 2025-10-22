@@ -157,6 +157,22 @@ long_mode_start:
     ; Set up stack
     mov rsp, stack_top
 
+    ; Enable FPU/SSE to avoid #UD when compiler emits SSE2 instructions
+    ; CR0: clear EM (bit 2), set MP (bit 1), clear TS (bit 3)
+    mov rax, cr0
+    and rax, ~(1 << 2)        ; CR0.EM = 0 (enable FPU instructions)
+    or  rax, (1 << 1)         ; CR0.MP = 1 (monitor coprocessor)
+    and rax, ~(1 << 3)        ; CR0.TS = 0 (clear task-switched)
+    mov cr0, rax
+
+    ; CR4: set OSFXSR (bit 9) and OSXMMEXCPT (bit 10)
+    mov rax, cr4
+    or  rax, (1 << 9) | (1 << 10)
+    mov cr4, rax
+
+    ; Initialize FPU state
+    fninit
+
     ; Clear screen
     mov rdi, 0xB8000
     mov rax, 0x0F200F200F200F20

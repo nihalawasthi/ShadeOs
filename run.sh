@@ -30,7 +30,11 @@ qemu-system-x86_64 \
     -cdrom shadeOS.iso \
     -m 512M \
     -serial stdio \
-    -enable-kvm 2>/dev/null || qemu-system-x86_64 \
+    -netdev user,id=net0 \
+    -device rtl8139,netdev=net0 \
+    || qemu-system-x86_64 \
     -cdrom shadeOS.iso \
     -m 512M \
-    -serial stdio
+    -serial stdio \
+    -netdev user,id=net0 \
+    -device rtl8139,netdev=net0

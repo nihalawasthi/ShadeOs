@@ -645,7 +645,8 @@ void tcp_input_ipv4(const uint8_t *ip_hdr, int ip_hdr_len, const uint8_t *tcp_pk
         if (c->lport == dstp) {
             /* Check for listening socket or established connection */
             if ((c->rport == 0 && (flags & TCP_SYN) && c->state == TCP_LISTEN) ||
-                (memcmp(c->raddr, ip_hdr + 12, 4) == 0 && c->rport == srcp)) {
+                (c->rport == srcp && memcmp(c->raddr, ip_hdr + 12, 4) == 0 &&
+                 memcmp(c->laddr, ip_hdr + 16, 4) == 0)) {
                 s = c; 
                 serial_write("[TCP] Found matching socket in state ");
                 serial_write_dec("", s->state);
@@ -715,6 +716,14 @@ void tcp_input_ipv4(const uint8_t *ip_hdr, int ip_hdr_len, const uint8_t *tcp_pk
         return;
     }
 
+    /* Handle RST in SYN-SENT: connection refused */
+    if (s->state == TCP_SYN_SENT && (flags & TCP_RST)) {
+        serial_write("[TCP] Received RST while in SYN_SENT (connection refused)\n");
+        s->state = TCP_CLOSED;
+        scheduler_wakeup(s->wait_send);
+        return;
+    }
+
     /* Handle SYN-ACK response for outgoing connections */
     if (s->state == TCP_SYN_SENT && (flags & (TCP_SYN | TCP_ACK)) == (TCP_SYN | TCP_ACK)) {
         serial_write("[TCP] Received SYN-ACK in SYN_SENT state\n");
@@ -741,8 +750,13 @@ void tcp_input_ipv4(const uint8_t *ip_hdr, int ip_hdr_len, const uint8_t *tcp_pk
         serial_write("[TCP] Processing ACK in state ");
         serial_write_dec("", s->state);
         serial_write("\n");
-        
-        tcp_acknowledge(s, ack);
+
+        /* Sanity: don't accept ACK beyond what we've sent */
+        if (ack > s->snd_nxt) {
+            serial_write("[TCP] Ignoring ACK beyond snd_nxt\n");
+        } else {
+            tcp_acknowledge(s, ack);
+        }
         
         /* advance connection state */
         if (s->state == TCP_SYN_RECEIVED && ack >= s->snd_nxt) {
@@ -773,7 +787,14 @@ void tcp_input_ipv4(const uint8_t *ip_hdr, int ip_hdr_len, const uint8_t *tcp_pk
         tcp_send_queued(s);
     }
 
-    /* Handle FIN */
+    /* Handle FIN/RST */
+    if (flags & TCP_RST) {
+        serial_write("[TCP] Received RST, closing connection\n");
+        s->state = TCP_CLOSED;
+        conn_list_remove(s);
+        free_socket_struct(s);
+        return;
+    }
     if (flags & TCP_FIN) {
         serial_write("[TCP] Received FIN\n");
         s->rcv_nxt++;
@@ -863,6 +884,9 @@ int sock_connect(int sd, const uint8_t ip[4], uint16_t port) {
     memcpy(s->raddr, ip, 4);
     s->rport = port;
     if (s->lport == 0) s->lport = (uint16_t)(1024 + (kernel_uptime_ms() % 40000));
+    /* Set local address for proper socket lookup on reply */
+    extern void net_get_local_ip(uint8_t out_ip[4]);
+    net_get_local_ip(s->laddr);
     s->iss = (uint32_t)(kernel_uptime_ms() & 0xffff);
     serial_write("[TCP] sock_connect: iss OK, ");
     s->snd_una = s->iss;
@@ -872,6 +896,9 @@ int sock_connect(int sd, const uint8_t ip[4], uint16_t port) {
     s->rcv_nxt = 0;
     serial_write("rcv_nxt OK");
     s->state = TCP_SYN_SENT;
+    serial_write("[TCP] sock_connect: state set to SYN_SENT (");
+    serial_write_hex("", s->state);
+    serial_write(")\n");
     /* send SYN */
     serial_write("[TCP] sock_connect: sending SYN\n");
     tcp_queue_segment(s, s->iss, TCP_SYN, NULL, 0);
