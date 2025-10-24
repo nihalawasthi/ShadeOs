@@ -99,7 +99,11 @@ uint64_t get_phys_addr(uint64_t virt_addr) {
     if (!pd) return 0;
     uint64_t* pt = get_table(pd[get_pd_index(virt_addr)] & ~0xFFFULL);
     if (!pt) return 0;
-    return pt[get_pt_index(virt_addr)] & ~0xFFFULL;
+    uint64_t pte = pt[get_pt_index(virt_addr)];
+    if (!(pte & PAGE_PRESENT)) return 0;
+    uint64_t phys_page_base = pte & ~0xFFFULL;
+    uint64_t offset = virt_addr & 0xFFFULL;
+    return phys_page_base | offset;
 } 
 
 void map_user_page(uint64_t virt_addr, uint64_t phys_addr) {

@@ -50,15 +50,22 @@ void icmp_handle_ipv4(const uint8_t src_ip[4], const uint8_t *icmp_payload, int 
         net_ipv4_send(src_ip, 1 /* ICMP */, reply, total_len);
         kfree(reply);
     } else if (ih->type == 0) {
-        /* echo reply received: could signal to a waiting socket/consumer */
+        /* echo reply received: print notification */
+        serial_write("[ICMP] Echo reply received from: ");
+        for (int i = 0; i < 4; ++i) {
+            char buf[8];
+            snprintf(buf, sizeof(buf), "%d", src_ip[i]);
+            serial_write(buf);
+            if (i < 3) serial_write(".");
+        }
+        serial_write("\n");
+        vga_print("[ICMP] Echo reply received\n");
     }
 }
 
 int icmp_send_echo_request(const uint8_t dst_ip[4], uint16_t id, uint16_t seq, const void *data, int dlen) {
     int icmp_len = (int)sizeof(struct icmp_hdr) + dlen;
-    serial_write_hex("icmp len", icmp_len);
     uint8_t *buf = (uint8_t*)kmalloc(icmp_len);
-    serial_write_hex("buf", (unsigned long)buf);
     if (!buf) return -1;
     struct icmp_hdr *ih = (struct icmp_hdr *)buf;
     ih->type = 8;

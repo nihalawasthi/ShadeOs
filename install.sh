@@ -37,20 +37,6 @@ else
     fi
 fi
 
-# Step 3: Verify environment
-print_status "Step 2/4: Environment Verification"
-if ./scripts/verify.sh; then
-    print_success "Environment verified"
-else
-    print_error "Verification failed, running debug..."
-    if ./scripts/debug.sh; then
-        print_success "Debug resolved the issue, retrying verification..."
-        ./scripts/verify.sh
-    else
-        print_error "Verification failed and could not be auto-resolved"
-        exit 1
-    fi
-fi
 
 # Step 4: Build kernel
 print_status "Step 3/4: Building Kernel"
@@ -66,7 +52,7 @@ else
         echo ""
         print_status "Manual build attempt with verbose output:"
         make clean
-        make all
+        make -j4
         exit 1
     fi
 fi

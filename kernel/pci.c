@@ -26,19 +26,7 @@
 #define PCI_COMMAND_MEMORY 0x02
 #define PCI_COMMAND_MASTER 0x04
 
-typedef struct pci_device {
-    uint8_t bus;
-    uint8_t slot;
-    uint8_t func;
-    uint16_t vendor_id;
-    uint16_t device_id;
-    uint8_t class_code;
-    uint8_t subclass;
-    uint8_t prog_if;
-    uint32_t bar[6];
-    uint8_t irq;
-    int device_id_registered;
-} pci_device_t;
+// struct pci_device and pci_device_t typedef are now in pci.h
 
 static pci_device_t pci_devices[32];
 static int pci_device_count = 0;

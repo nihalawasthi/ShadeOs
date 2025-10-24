@@ -23,7 +23,6 @@ int netdev_register(const char *name, const uint8_t mac[6], int mtu, netdev_send
             netdevs[i].send = send;
             netdevs[i].driver = driver;
             if (default_idx == -1) default_idx = i;
-            serial_write("[NETDEV] Registered "); serial_write(netdevs[i].name); serial_write("\n");
             return netdevs[i].id;
         }
     }

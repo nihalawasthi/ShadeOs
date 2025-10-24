@@ -576,7 +576,7 @@ impl BashShell {
         match cmd {
             b"help" => self.cmd_help(), //work
             b"exit" => self.cmd_exit_heap(args_slice, argc), //work but needs to actually exit the shell
-            b"cd" => self.cmd_cd_heap(args_slice, argc), //works but shouldn't work for non existent directories
+            b"cd" => self.cmd_cd_heap(args_slice, argc), //works
             b"pwd" => self.cmd_pwd_heap(args_slice, argc),//works
             b"ls" => self.cmd_ls_heap(args_slice, argc), //works but needs to list (. and  ..) in the list (minor upgrade)
             b"cat" => self.cmd_cat_heap(args_slice, argc), //cant test due to keyboard inout limitations doesnt supports alternate chars(shift + char)

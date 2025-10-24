@@ -4,15 +4,7 @@
 #include "task.h"
 #include "idt.h"
 
-// Define registers_t if not already defined
-#ifndef registers_t
-typedef struct {
-    unsigned long int dummy;
-} registers_t;
-#endif
-
-// Forward declarations
-void register_interrupt_handler(int n, void (*handler)(registers_t));
+// Forward declaration for the interrupt wrapper (defined in idt.c)
 void timer_interrupt_wrapper(registers_t regs);
 
 #define PIT_CHANNEL0 0x40

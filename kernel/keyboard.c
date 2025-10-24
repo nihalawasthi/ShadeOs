@@ -22,13 +22,10 @@ void vga_putchar(char);
 // Remove static inline inb and outb definitions, since kernel.h provides them
 #ifndef registers_t
 // Minimal stub for registers_t if not defined
-typedef struct {
-    unsigned long int dummy;
-} registers_t;
 #endif
 #ifndef register_interrupt_handler
-void register_interrupt_handler(int n, void (*handler)(registers_t));
 #endif
+// `registers_t` and `register_interrupt_handler` are provided by `idt.h`.
 // --- End compatibility shims ---
 
 // Remove C-side keyboard buffer and related state
@@ -57,6 +54,7 @@ void poll_keyboard_input() {
 void keyboard_handler(registers_t regs) {
     (void)regs; // Silence unused parameter warning
     poll_keyboard_input();
+    serial_write("IRQ1 fired\n");
 }
 
 // Ensure keyboard_interrupt_handler is defined at file scope

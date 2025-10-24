@@ -26,6 +26,14 @@ extern void idt_flush(uint64_t);
 // Forward declarations for device handlers
 void timer_interrupt_handler();
 void keyboard_interrupt_handler();
+// Dynamic C-level handlers for interrupts
+static void (*c_interrupt_handlers[256])(registers_t) = { 0 };
+
+// Register a C-level interrupt handler
+void register_interrupt_handler(int n, void (*handler)(registers_t)) {
+    if (n < 0 || n >= 256) return;
+    c_interrupt_handlers[n] = handler;
+}
 
 static void idt_set_gate(uint8_t num, uint64_t base, uint16_t selector, uint8_t flags) {
     idt[num].base_low = base & 0xFFFF;
@@ -142,6 +150,19 @@ void isr_handler(uint64_t int_no, uint64_t err_code) {
     } else if (int_no == 33) {
         keyboard_interrupt_handler();
         outb(0x20, 0x20); // EOI to master PIC
+        return;
+    } else if (int_no >= 32 && int_no < 48) {
+        // IRQ from PIC (32..47). If a C-level handler is registered, call it.
+        if (c_interrupt_handlers[int_no]) {
+            // Build a minimal registers_t to pass through
+            registers_t r = {0};
+            c_interrupt_handlers[int_no](r);
+        }
+        // Send EOI. If IRQ came from slave (int_no >= 40) we must send to slave then master.
+        if (int_no >= 40) {
+            outb(0xA0, 0x20);
+        }
+        outb(0x20, 0x20);
         return;
     } else {
         vga_set_color(0x0C);

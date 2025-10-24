@@ -1,33 +1,56 @@
-# setup.sh - Essential environment setup and verification
-
+#!/usr/bin/env bash
 set -e
 
 echo "🚀 ShadeOS Environment Setup"
 echo "============================"
 
-# Install essential packages
-sudo pacman -S --needed --noconfirm \
-    base-devel git nasm qemu-full grub xorriso libisoburn mtools gdb
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "${SCRIPT_DIR}/os-detect.sh" ]; then
+    # shellcheck source=/dev/null
+    . "${SCRIPT_DIR}/os-detect.sh"
+else
+    echo "[ERROR] os-detect.sh not found in ${SCRIPT_DIR}"
+    exit 1
+fi
 
-# Install cross-compiler if missing
-if ! command -v x86_64-elf-gcc &> /dev/null; then
-    if ! command -v yay &> /dev/null; then
-        cd /tmp && git clone https://aur.archlinux.org/yay.git && cd yay && makepkg -si --noconfirm
+echo "[INFO] Detected OS family: ${OS_FAMILY}"
+
+if [ "${OS_FAMILY}" = "arch" ]; then
+    echo "[INFO] Installing packages with pacman..."
+    eval "${PKG_INSTALL_CMD} ${REQUIRED_PACKAGES[*]}"
+    # cross compiler via AUR if needed
+    if ! command -v x86_64-elf-gcc &> /dev/null; then
+        echo "[INFO] Installing x86_64-elf-* from AUR (requires yay)..."
+        if ! command -v yay &> /dev/null; then
+            cd /tmp && git clone https://aur.archlinux.org/yay.git && cd yay && makepkg -si --noconfirm
+        fi
+        yay -S --noconfirm x86_64-elf-gcc x86_64-elf-binutils || true
     fi
-    yay -S --noconfirm x86_64-elf-gcc x86_64-elf-binutils
+
+elif [ "${OS_FAMILY}" = "ubuntu" ]; then
+    echo "[INFO] Installing packages with apt..."
+    eval "${PKG_UPDATE_CMD}"
+    eval "${PKG_INSTALL_CMD} ${REQUIRED_PACKAGES[*]}"
+    if ! command -v x86_64-elf-gcc &> /dev/null; then
+        echo "[INFO] x86_64-elf-gcc not found. Install or build a cross toolchain if needed."
+    fi
+
+else
+    echo "[WARNING] Unknown distribution. Please install these packages manually:"
+    for p in "${REQUIRED_PACKAGES[@]}"; do echo "  - $p"; done
 fi
 
-# Install Rust toolchain
+# Rust toolchain (common)
 if ! command -v rustup &> /dev/null; then
-    echo "Installing rustup..."
+    echo "[INFO] Installing rustup..."
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-    source "$HOME/.cargo/env"
+    source "$HOME/.cargo/env" || true
 fi
-rustup default nightly
-rustup target add x86_64-unknown-none
+rustup default nightly || true
+rustup target add x86_64-unknown-none || true
 
-# Setup aliases
-cat >> ~/.zshrc << 'EOF'
+# Setup aliases (append if not present)
+grep -qxF "alias shade-build='make clean && make'" ~/.zshrc 2>/dev/null || cat >> ~/.zshrc <<'EOF'
 alias shade-build='make clean && make'
 alias shade-run='make run'
 alias shade-debug='make debug'
@@ -46,8 +69,16 @@ check_tool() {
         ((ERRORS++))
     fi
 }
+if [ "${OS_FAMILY}" = "arch" ]; then
+check_tool "x86_64-elf-gcc" 
+elif [ "${OS_FAMILY}" = "ubuntu" ]; then
+check_tool "x86_64-linux-gnu-gcc"
+else
+    # Try to find any prefixed gcc
+    echo "[WARNING]"
+fi  
 
-check_tool "x86_64-elf-gcc"
+check_tool "make"
 check_tool "nasm"
 check_tool "qemu-system-x86_64"
 check_tool "grub-mkrescue"
@@ -61,6 +92,6 @@ if [[ $ERRORS -eq 0 ]]; then
     echo "✅ Setup complete!"
     exit 0
 else
-    echo "❌ $ERRORS missing tools"
+    echo "❌ $ERRORS missing tools — run ./scripts/verify.sh for distro-specific install suggestions"
     exit 1
 fi

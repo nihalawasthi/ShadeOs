@@ -315,7 +315,6 @@ void kernel_main(uint64_t mb2_info_ptr) {
 
     // Syscalls
     syscall_init();
-    // Initialize Rust components
     rust_entry_point();
 
     // Clear keyboard buffer before starting shell
@@ -326,19 +325,7 @@ void kernel_main(uint64_t mb2_info_ptr) {
     serial_write("[CORE] Syscalls and Scheduler initialized.\n");
     rust_bash_init();
 
-    // ipc_test();
-    // Automated ping test before launching shell
-    serial_write("[AUTO-TEST] Running ping to 10.0.2.2...\n");
-    extern int icmp_send_echo_request(const uint8_t dst_ip[4], uint16_t id, uint16_t seq, const void *data, int dlen);
-    uint8_t test_ip[4] = {10, 0, 2, 2};
-    int ping_result = icmp_send_echo_request(test_ip, 0x1234, 1, NULL, 0);
-    serial_write("[AUTO-TEST] icmp_send_echo_request returned: ");
-    serial_write_dec("", ping_result);
-    serial_write("\n");
-
     rust_bash_run();
-    // serial_write("[TEST] Starting TCP HTTP GET test...\n");
-    // serial_write("[TEST] TCP test finished.\n");
     rust_vga_print("\n");
 }
 
