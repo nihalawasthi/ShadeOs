@@ -6,32 +6,33 @@
 #define PCI_CONFIG_ADDRESS 0xCF8
 #define PCI_CONFIG_DATA    0xCFC
 
+// PCI Configuration Space Offsets
 #define PCI_VENDOR_ID      0x00
 #define PCI_DEVICE_ID      0x02
 #define PCI_COMMAND        0x04
 #define PCI_STATUS         0x06
-#define PCI_CLASS_CODE     0x0B
-#define PCI_SUBCLASS       0x0A
+#define PCI_REVISION_ID    0x08
 #define PCI_PROG_IF        0x09
+#define PCI_SUBCLASS       0x0A
+#define PCI_CLASS_CODE     0x0B
 #define PCI_HEADER_TYPE    0x0E
 #define PCI_BAR0           0x10
-#define PCI_BAR1           0x14
-#define PCI_BAR2           0x18
-#define PCI_BAR3           0x1C
-#define PCI_BAR4           0x20
-#define PCI_BAR5           0x24
 #define PCI_INTERRUPT_LINE 0x3C
 
+// PCI Header Types
+#define PCI_HEADER_TYPE_NORMAL 0x00
+#define PCI_HEADER_TYPE_BRIDGE 0x01
+
+// PCI Command Register Bits
 #define PCI_COMMAND_IO     0x01
 #define PCI_COMMAND_MEMORY 0x02
 #define PCI_COMMAND_MASTER 0x04
 
-// struct pci_device and pci_device_t typedef are now in pci.h
-
-static pci_device_t pci_devices[32];
+static pci_device_t pci_devices[64];
 static int pci_device_count = 0;
 
-void pci_test_devices(void);
+// Forward declarations
+static void pci_scan_bus(uint8_t bus);
 
 static uint32_t pci_config_read_dword(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
     uint32_t address = (1 << 31) | (bus << 16) | (slot << 11) | (func << 8) | (offset & 0xFC);
@@ -44,6 +45,11 @@ static uint16_t pci_config_read_word(uint8_t bus, uint8_t slot, uint8_t func, ui
     return (dword >> ((offset & 2) * 8)) & 0xFFFF;
 }
 
+static uint8_t pci_config_read_byte(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
+    uint32_t dword = pci_config_read_dword(bus, slot, func, offset & 0xFC);
+    return (dword >> ((offset & 3) * 8)) & 0xFF;
+}
+
 static void pci_config_write_dword(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uint32_t value) {
     uint32_t address = (1 << 31) | (bus << 16) | (slot << 11) | (func << 8) | (offset & 0xFC);
     outl(PCI_CONFIG_ADDRESS, address);
@@ -53,79 +59,76 @@ static void pci_config_write_dword(uint8_t bus, uint8_t slot, uint8_t func, uint
 void pci_enable_device(pci_device_t *dev) {
     uint16_t command = pci_config_read_word(dev->bus, dev->slot, dev->func, PCI_COMMAND);
     command |= PCI_COMMAND_IO | PCI_COMMAND_MEMORY | PCI_COMMAND_MASTER;
-    
-    uint32_t cmd_dword = pci_config_read_dword(dev->bus, dev->slot, dev->func, PCI_COMMAND & 0xFC);
-    cmd_dword = (cmd_dword & 0xFFFF0000) | command;
-    pci_config_write_dword(dev->bus, dev->slot, dev->func, PCI_COMMAND & 0xFC, cmd_dword);
+    pci_config_write_dword(dev->bus, dev->slot, dev->func, PCI_COMMAND, command);
 }
 
-static void pci_probe_bars(pci_device_t *dev) {
-    for (int bar = 0; bar < 6; bar++) {
-        uint8_t bar_offset = PCI_BAR0 + (bar * 4);
-        
-        /* Read current BAR value */
-        uint32_t bar_value = pci_config_read_dword(dev->bus, dev->slot, dev->func, bar_offset);
-        
-        if (bar_value == 0) {
-            dev->bar[bar] = 0;
-            continue;
-        }
-        
-        /* Write all 1s to determine size */
-        pci_config_write_dword(dev->bus, dev->slot, dev->func, bar_offset, 0xFFFFFFFF);
-        pci_config_read_dword(dev->bus, dev->slot, dev->func, bar_offset);
-        
-        /* Restore original value */
-        pci_config_write_dword(dev->bus, dev->slot, dev->func, bar_offset, bar_value);
-        
-        dev->bar[bar] = bar_value;
+static void pci_scan_func(uint8_t bus, uint8_t slot, uint8_t func) {
+    uint16_t vendor_id = pci_config_read_word(bus, slot, func, PCI_VENDOR_ID);
+    if (vendor_id == 0xFFFF) {
+        return; // No device
     }
-}
 
-static void pci_scan_device(uint8_t bus, uint8_t slot) {
-    uint16_t vendor_id = pci_config_read_word(bus, slot, 0, PCI_VENDOR_ID);
-    if (vendor_id == 0xFFFF) return; /* No device */
-    
-    if (pci_device_count >= 32) {
-        serial_write("[PCI] Too many devices, skipping\n");
+    if (pci_device_count >= 64) {
+        serial_write("[PCI] Too many devices, skipping rest of scan.\n");
         return;
     }
-    
+
     pci_device_t *dev = &pci_devices[pci_device_count++];
     dev->bus = bus;
     dev->slot = slot;
-    dev->func = 0;
+    dev->func = func;
     dev->vendor_id = vendor_id;
-    dev->device_id = pci_config_read_word(bus, slot, 0, PCI_DEVICE_ID);
-    dev->class_code = (pci_config_read_dword(bus, slot, 0, PCI_CLASS_CODE & 0xFC) >> 24) & 0xFF;
-    dev->subclass = (pci_config_read_dword(bus, slot, 0, PCI_SUBCLASS & 0xFC) >> 16) & 0xFF;
-    dev->prog_if = (pci_config_read_dword(bus, slot, 0, PCI_PROG_IF & 0xFC) >> 8) & 0xFF;
-    dev->irq = (pci_config_read_dword(bus, slot, 0, PCI_INTERRUPT_LINE & 0xFC) >> 0) & 0xFF;
-    dev->device_id_registered = -1; // Initialize to invalid ID
-    
-    /* Probe BARs to get resource information */
-    pci_probe_bars(dev);
-    pci_enable_device(dev);
+    dev->device_id = pci_config_read_word(bus, slot, func, PCI_DEVICE_ID);
+    dev->class_code = pci_config_read_byte(bus, slot, func, PCI_CLASS_CODE);
+    dev->subclass = pci_config_read_byte(bus, slot, func, PCI_SUBCLASS);
+    dev->prog_if = pci_config_read_byte(bus, slot, func, PCI_PROG_IF);
+    dev->irq = pci_config_read_byte(bus, slot, func, PCI_INTERRUPT_LINE);
+    dev->device_id_registered = -1;
 
-    // Check if this is a recognized device and print a detailed log if so.
-    // if (dev->vendor_id == 0x10EC && dev->device_id == 0x8139) {
-    //     char log_buf[128];
-    //     uint32_t io_base = dev->bar[0] & ~0x3; // I/O addresses are in BAR0 for RTL8139
-    //     snprintf(log_buf, sizeof(log_buf), "[rtl8139] net0: Found at %02x:%02x.%x, I/O at 0x%x, IRQ %d\n",
-    //              bus, slot, 0, io_base, dev->irq);
-    //     serial_write(log_buf);
-    // }
-    // You could add more `else if` blocks here for other supported devices (e.g., IDE controllers, sound cards).
+    char log_buf[128];
+    snprintf(log_buf, sizeof(log_buf), "[PCI] Found device %02x:%02x.%x - %04x:%04x (Class %02x:%02x)\n",
+             bus, slot, func, dev->vendor_id, dev->device_id, dev->class_code, dev->subclass);
+    serial_write(log_buf);
 
-    __asm__ volatile("" ::: "memory");
+    for (int i = 0; i < 6; i++) {
+        dev->bar[i] = pci_config_read_dword(bus, slot, func, PCI_BAR0 + (i * 4));
+    }
+
+    // If it's a PCI-to-PCI bridge, scan the bus behind it
+    if (dev->class_code == 0x06 && dev->subclass == 0x04) {
+        uint8_t secondary_bus = pci_config_read_byte(bus, slot, func, 0x19);
+        if (secondary_bus != 0) {
+            serial_write("[PCI] Scanning secondary bus: ");
+            serial_write_dec("", secondary_bus);
+            serial_write("\n");
+            pci_scan_bus(secondary_bus);
+        }
+    }
+}
+
+static void pci_scan_bus(uint8_t bus) {
+    for (uint8_t slot = 0; slot < 32; slot++) {
+        uint16_t vendor_id = pci_config_read_word(bus, slot, 0, PCI_VENDOR_ID);
+        if (vendor_id == 0xFFFF) {
+            continue;
+        }
+
+        pci_scan_func(bus, slot, 0);
+
+        uint8_t header_type = pci_config_read_byte(bus, slot, 0, PCI_HEADER_TYPE);
+        if ((header_type & 0x80) != 0) { // Multi-function device
+            for (uint8_t func = 1; func < 8; func++) {
+                pci_scan_func(bus, slot, func);
+            }
+        }
+    }
 }
 
 void pci_init(void) {
     pci_device_count = 0;
-    for (uint8_t slot = 0; slot < 8; slot++) {
-        pci_scan_device(0, slot);
-        for (volatile int i = 0; i < 10000; i++);
-    }
+    serial_write("[PCI] Starting PCI bus scan...\n");
+    pci_scan_bus(0); // Start scan on bus 0
+    serial_write("[PCI] PCI bus scan complete.\n");
 
     if (pci_device_count == 0) {
         serial_write("[PCI] No devices found.\n");
@@ -134,14 +137,8 @@ void pci_init(void) {
         snprintf(log_buf, sizeof(log_buf), "[PCI] Found %d device(s).\n", pci_device_count);
         serial_write(log_buf);
     }
-        
-    // Memory barrier before returning (avoid SSE-only mfence)
-    __asm__ volatile("" ::: "memory");
-    
 }
 
-/* This function was added to provide controlled access to a device's BARs. */
-/* Its declaration should be in pci.h */
 uint32_t pci_get_bar(pci_device_t *dev, int bar_num) {
     if (!dev || bar_num < 0 || bar_num >= 6) {
         return 0;

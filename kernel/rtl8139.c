@@ -396,7 +396,7 @@ void e1000_init(void) {
     if ((bar0 & 1) == 0) { /* memory-mapped */
         e1000_mmio = bar0 & ~0xF;
         char buf[80];
-        serial_write("[PCNET] [E1000] Found MMIO at");
+        serial_write("[E1000] Found MMIO at ");
         serial_write_hex("", e1000_mmio);
         serial_write(" IRQ ");
         serial_write_dec("", dev->irq);
@@ -404,7 +404,7 @@ void e1000_init(void) {
     } else {
         uint32_t io_base = bar0 & ~0x3;
         char buf[80];
-        serial_write("[PCNET] [E1000] Found MMIO at");
+        serial_write("[E1000] Found I/O at ");
         serial_write_hex("", io_base);
         serial_write(" IRQ ");
         serial_write_dec("", dev->irq);
