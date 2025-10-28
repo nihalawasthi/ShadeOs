@@ -50,7 +50,7 @@ static void pci_config_write_dword(uint8_t bus, uint8_t slot, uint8_t func, uint
     outl(PCI_CONFIG_DATA, value);
 }
 
-static void pci_enable_device(pci_device_t *dev) {
+void pci_enable_device(pci_device_t *dev) {
     uint16_t command = pci_config_read_word(dev->bus, dev->slot, dev->func, PCI_COMMAND);
     command |= PCI_COMMAND_IO | PCI_COMMAND_MEMORY | PCI_COMMAND_MASTER;
     
@@ -165,103 +165,4 @@ pci_device_t *pci_find_class(uint8_t class_code, uint8_t subclass) {
         }
     }
     return NULL;
-}
-
-void pci_test_devices(void) {
-    extern void rust_vga_print(const char*);    
-    if (pci_device_count == 0) {
-        serial_write("[PCI TEST] No PCI devices found!\n");
-        rust_vga_print("[PCI TEST] ERROR: No PCI devices discovered\n");
-        return;
-    }
-    
-    rust_vga_set_color(0x0A);
-    rust_vga_print("Found ");
-    // Print device count
-    char count_str[16];
-    int temp = pci_device_count;
-    int i = 0;
-    do {
-        count_str[i++] = '0' + (temp % 10);
-        temp /= 10;
-    } while (temp > 0);
-    count_str[i] = '\0';
-    // Reverse the string
-    for (int j = 0; j < i/2; j++) {
-        char t = count_str[j];
-        count_str[j] = count_str[i-1-j];
-        count_str[i-1-j] = t;
-    }
-    rust_vga_print(count_str);
-    rust_vga_print(" PCI devices:\n");
-    rust_vga_set_color(0x0F);
-    
-    for (int i = 0; i < pci_device_count; i++) {
-        pci_device_t *dev = &pci_devices[i];
-        
-        rust_vga_print("\t Device ");
-        rust_vga_print(count_str); // Reuse for device number
-        temp = i + 1;
-        int idx = 0;
-        do {
-            count_str[idx++] = '0' + (temp % 10);
-            temp /= 10;
-        } while (temp > 0);
-        count_str[idx] = '\0';
-        for (int j = 0; j < idx/2; j++) {
-            char t = count_str[j];
-            count_str[j] = count_str[idx-1-j];
-            count_str[idx-1-j] = t;
-        }
-        rust_vga_print(count_str);
-        rust_vga_print(": ");
-        
-        // Print vendor:device ID in hex
-        char hex_buf[8];
-        uint16_t vendor = dev->vendor_id;
-        for (int h = 0; h < 4; h++) {
-            int shift = (3 - h) * 4;
-            int digit = (vendor >> shift) & 0xF;
-            hex_buf[h] = (digit < 10) ? ('0' + digit) : ('A' + digit - 10);
-        }
-        hex_buf[4] = ':';
-        uint16_t device = dev->device_id;
-        for (int h = 0; h < 3; h++) {
-            int shift = (2 - h) * 4;
-            int digit = (device >> shift) & 0xF;
-            hex_buf[5 + h] = (digit < 10) ? ('0' + digit) : ('A' + digit - 10);
-        }
-        hex_buf[7] = '\0';
-        rust_vga_print(hex_buf);
-        
-        // Print class information
-        rust_vga_print(" Class: ");
-        temp = dev->class_code;
-        idx = 0;
-        do {
-            count_str[idx++] = '0' + (temp % 10);
-            temp /= 10;
-        } while (temp > 0);
-        count_str[idx] = '\0';
-        for (int j = 0; j < idx/2; j++) {
-            char t = count_str[j];
-            count_str[j] = count_str[idx-1-j];
-            count_str[idx-1-j] = t;
-        }
-        rust_vga_print(count_str);
-        
-        if (dev->class_code == 0x02 && dev->subclass == 0x00) {
-            rust_vga_print(" (Network Controller - Ethernet)\n");
-        } else if (dev->class_code == 0x01) {
-            rust_vga_print(" (Mass Storage Controller)\n");
-        } else if (dev->class_code == 0x03) {
-            rust_vga_print(" (Display Controller)\n");
-        } else if (dev->class_code == 0x06) {
-            rust_vga_print(" (Bridge Device)\n");
-        } else {
-            rust_vga_print(" (Other)\n");
-        }
-    }
-    
-    serial_write("[PCI TEST] PCI enumeration: SUCCESS\n");
 }

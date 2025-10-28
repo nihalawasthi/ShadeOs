@@ -113,7 +113,7 @@ void rtl8139_init() {
     /* Find RTL8139 via PCI enumeration */
     pci_device_t *pci_dev = pci_find_device(RTL8139_VENDOR_ID, RTL8139_DEVICE_ID);
     if (!pci_dev) {
-        vga_print("[NET] RTL8139 not found via PCI\n");
+        serial_write("[NET] RTL8139 not found via PCI\n");
         return;
     }
     
@@ -189,8 +189,11 @@ void rtl8139_init() {
                 mask &= ~(1u << (irq - 8));
                 outb(0xA1, mask);
             }
-            // Register C-level interrupt handler at vector (irq + 32)
+            /* Register C-level interrupt handler at vector (irq + 32) */
             register_interrupt_handler(32 + irq, rtl8139_irq_handler);
+            vga_print("[NET] RTL8139 IRQ handler registered\n");
+        } else {
+            vga_print("[NET] RTL8139 reported invalid IRQ, skipping IRQ setup\n");
         }
     }
     vga_print("[NET] RTL8139 initialization complete\n");
@@ -313,3 +316,108 @@ int rtl8139_poll_recv(void* buf, int maxlen) {
 }
 
 struct mac_addr rtl8139_get_mac() { return mac; }
+
+
+/* AMD PCnet vendor/device */
+#define PCNET_VENDOR_ID 0x1022
+#define PCNET_DEVICE_ID 0x2000
+
+static uint32_t pcnet_io_base = 0;
+static int pcnet_initialized = 0;
+
+static int pcnet_send_frame(net_device_t *dev, const void *frame, int len) {
+    (void)dev; (void)frame; (void)len;
+    serial_write("[PCNET] send_frame called (stub)\n");
+    return -1;
+}
+
+void pcnet_init(void) {
+    pci_device_t *dev = pci_find_device(PCNET_VENDOR_ID, PCNET_DEVICE_ID);
+    if (!dev) {
+        serial_write("[PCNET] No PCnet device found\n");
+        return;
+    }
+
+    /* Get BAR0 (I/O) */
+    uint32_t bar0 = pci_get_bar(dev, 0);
+    if (!bar0) {
+        serial_write("[PCNET] PCnet has no BAR0\n");
+        return;
+    }
+    pcnet_io_base = bar0 & ~0x3u;
+    char buf[64];
+    serial_write("[PCNET] Found at I/O base 0x");
+    serial_write_hex("", pcnet_io_base);
+    serial_write(" IRQ ");
+    serial_write_dec("", dev->irq);
+    serial_write("\n");
+
+    /* Enable device (IO, MEM, BusMaster) */
+    pci_enable_device(dev);
+
+    /* Register net device stub (use a generated MAC if needed) */
+    uint8_t dummy_mac[6] = {0x02, 0x00, 0x00, 0x00, (uint8_t)(dev->bus), (uint8_t)(dev->slot)};
+    netdev_register("pcnet", dummy_mac, 1500, pcnet_send_frame, (void*)dev);
+
+    pcnet_initialized = 1;
+    serial_write("[PCNET] initialization complete (stub)\n");
+}
+
+
+
+#define E1000_VENDOR_ID 0x8086
+#define E1000_DEVICE_ID 0x100F /* VMware E1000 device ID */
+
+/* minimal state */
+static int e1000_initialized = 0;
+static uint32_t e1000_mmio = 0;
+
+static int e1000_send_frame(net_device_t *dev, const void *frame, int len) {
+    (void)dev; (void)frame; (void)len;
+    serial_write("[E1000] send_frame called (stub)\n");
+    return -1;
+}
+
+void e1000_init(void) {
+    pci_device_t *dev = pci_find_device(E1000_VENDOR_ID, E1000_DEVICE_ID);
+    if (!dev) {
+        serial_write("[E1000] No e1000 device found\n");
+        return;
+    }
+
+    /* Read BAR0 */
+    uint32_t bar0 = pci_get_bar(dev, 0);
+    if (!bar0) {
+        serial_write("[E1000] e1000 has no BAR0\n");
+        return;
+    }
+
+    /* If BAR indicates MMIO, record MMIO base */
+    if ((bar0 & 1) == 0) { /* memory-mapped */
+        e1000_mmio = bar0 & ~0xF;
+        char buf[80];
+        serial_write("[PCNET] [E1000] Found MMIO at");
+        serial_write_hex("", e1000_mmio);
+        serial_write(" IRQ ");
+        serial_write_dec("", dev->irq);
+        serial_write("\n");
+    } else {
+        uint32_t io_base = bar0 & ~0x3;
+        char buf[80];
+        serial_write("[PCNET] [E1000] Found MMIO at");
+        serial_write_hex("", io_base);
+        serial_write(" IRQ ");
+        serial_write_dec("", dev->irq);
+        serial_write("\n");
+    }
+
+    /* Enable device */
+    pci_enable_device(dev);
+
+    /* Register net device stub: create a dummy MAC using bus/slot */
+    uint8_t dummy_mac[6] = {0x02, 0xA0, (uint8_t)dev->bus, (uint8_t)dev->slot, (uint8_t)dev->func, 0x00};
+    netdev_register("e1000", dummy_mac, 1500, e1000_send_frame, (void*)dev);
+
+    e1000_initialized = 1;
+    serial_write("[E1000] initialization complete (stub)\n");
+}

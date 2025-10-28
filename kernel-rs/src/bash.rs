@@ -2664,7 +2664,7 @@ impl BashShell {
 
     fn cmd_device(&mut self) {
         unsafe{
-        pci_test_devices();
+            print_str(b"will tell next time\n");
         };
         self.last_exit_code = 0;
     }

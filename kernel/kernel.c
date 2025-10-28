@@ -7,7 +7,6 @@
 #include "http.h"
 #include "serial.h"
 #include "vfs.h"
-#include "rtl8139.h"
 #include "net.h"
 #include "task.h"
 #include "syscall.h"
@@ -83,6 +82,13 @@ void pic_init() {
     // Unmask only IRQ0 (timer) and IRQ1 (keyboard)
     outb(0x21, 0xFC);
     outb(0xA1, 0xFF);
+    // Debug: print current PIC masks
+    {
+        uint8_t master_mask = inb(0x21);
+        uint8_t slave_mask = inb(0xA1);
+        serial_write("[PIC] Master mask=0x"); serial_write_hex("", master_mask); serial_write("\n");
+        serial_write("[PIC] Slave mask=0x"); serial_write_hex("", slave_mask); serial_write("\n");
+    }
 }
 
 void demo_task1() {
@@ -228,7 +234,6 @@ void kernel_main(uint64_t mb2_info_ptr) {
     extern void icmp_init(void);
     extern void tcp_init(void);
     device_framework_init();
-    netdev_init();
     arp_init();
     icmp_init();
     tcp_init();
@@ -239,7 +244,7 @@ void kernel_main(uint64_t mb2_info_ptr) {
     __asm__ volatile("" ::: "memory");
     
     // Network
-    rtl8139_init();
+    netdev_init();
     struct ip_addr ip = (struct ip_addr){{10, 0, 2, 15}};
     net_init(ip);
     /* Periodically poll NIC RX to feed network stack */
@@ -324,6 +329,21 @@ void kernel_main(uint64_t mb2_info_ptr) {
     // Initialize bash shell
     serial_write("[CORE] Syscalls and Scheduler initialized.\n");
     rust_bash_init();
+
+    // const char* url = "http://www.google.com\0";
+    // unsigned char out[8192];  // buffer for response
+
+    // int ret = http_get(url, out, sizeof(out));
+    // if (ret > 0) {
+    //     serial_write("HTTP GET successful, response:\n");
+    //     for (int i = 0; i < ret; i++) {
+    //         unsigned char s[2] = { out[i], 0 };
+    //         serial_write((const char*)s);
+    //     }
+    //     serial_write("\n");
+    // } else {
+    //     serial_write("HTTP GET failed\n");
+    // }
 
     rust_bash_run();
     rust_vga_print("\n");

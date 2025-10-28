@@ -1,4 +1,5 @@
 #include "netdev.h"
+#include "rtl8139.h"
 #include "serial.h"
 #include "kernel.h" // For memset, memcpy
 
@@ -7,6 +8,14 @@ static int in_use[NETDEV_MAX];
 static int default_idx = -1;
 
 void netdev_init(void) {
+    /* Try RTL8139 first (keeps QEMU happy) */
+    rtl8139_init();
+    /* Try PCnet */
+    pcnet_init();
+    /* Try Intel e1000 */
+    e1000_init();
+
+    
     memset(in_use, 0, sizeof(in_use));
     default_idx = -1;
 }

@@ -37,9 +37,6 @@ void vga_putchar(char);
 // uint8_t ctrl = 0;
 // uint8_t keypresses[256] = {0};
 // static int capslock = 0;
-
-// Map kprint to vga_print and terminal_putchar to vga_putchar for compatibility
-#define kprint vga_print
 #define terminal_putchar vga_putchar
 
 void poll_keyboard_input() {
@@ -54,7 +51,6 @@ void poll_keyboard_input() {
 void keyboard_handler(registers_t regs) {
     (void)regs; // Silence unused parameter warning
     poll_keyboard_input();
-    serial_write("IRQ1 fired\n");
 }
 
 // Ensure keyboard_interrupt_handler is defined at file scope
@@ -64,77 +60,77 @@ void keyboard_interrupt_handler(registers_t regs) {
 }
 
 void initialize_keyboard() {
-    kprint("Initializing keyboard.\n");
+    vga_print("Initializing keyboard.\n");
 
     outb(0x64, 0xFF);
     uint8_t status = inb(0x64);
-    kprint("Got status after reset.\n");
+    vga_print("Got status after reset.\n");
     
     status = inb(0x64);
     if(status & (1 << 0)) {
-        kprint("Output buffer full.\n");
+        vga_print("Output buffer full.\n");
     }
     else {
-        kprint("Output buffer empty.\n");
+        vga_print("Output buffer empty.\n");
     }
 
     if(status & (1 << 1)) {
-        kprint("Input buffer full.\n");
+        vga_print("Input buffer full.\n");
     }
     else {
-        kprint("Input buffer empty.\n");
+        vga_print("Input buffer empty.\n");
     }
 
     if(status & (1 << 2)) {
-        kprint("System flag set.\n");
+        vga_print("System flag set.\n");
     }
     else {
-        kprint("System flag unset.\n");
+        vga_print("System flag unset.\n");
     }
 
     if(status & (1 << 3)) {
-        kprint("Command/Data -> PS/2 device.\n");
+        vga_print("Command/Data -> PS/2 device.\n");
     }
     else {
-        kprint("Command/Data -> PS/2 controller.\n");
+        vga_print("Command/Data -> PS/2 controller.\n");
     }
 
     if(status & (1 << 6)) {
-        kprint("Timeout error.\n");
+        vga_print("Timeout error.\n");
     }
     else {
-        kprint("No timeout error.\n");
+        vga_print("No timeout error.\n");
     }
 
     if(status & (1 << 7)) {
-        kprint("Parity error.\n");
+        vga_print("Parity error.\n");
     }
     else {
-        kprint("No parity error.\n");
+        vga_print("No parity error.\n");
     }
 
     // Test the controller.
     outb(0x64, 0xAA);
     uint8_t result = inb(0x60);
     if(result == 0x55) {
-        kprint("PS/2 controller test passed.\n");
+        vga_print("PS/2 controller test passed.\n");
     }
     else if(result == 0xFC) {
-        kprint("PS/2 controller test failed.\n");
+        vga_print("PS/2 controller test failed.\n");
 //        return;
     }
     else {
-        kprint("PS/2 controller responded to test with unknown code.\n");
-        kprint("Trying to continue.\n");
+        vga_print("PS/2 controller responded to test with unknown code.\n");
+        vga_print("Trying to continue.\n");
 //        return;
     }
 
     // Check the PS/2 controller configuration byte.
     outb(0x64, 0x20);
     result = inb(0x60);
-    kprint("PS/2 config byte.\n");
+    vga_print("PS/2 config byte.\n");
 
-    kprint("Keyboard ready to go!\n\n");
+    vga_print("Keyboard ready to go!\n\n");
 }
 
 // This function now calls into the Rust keyboard module
