@@ -31,9 +31,6 @@ extern "C" {
     fn rust_process_list();
     fn pmm_total_memory() -> u64;
     fn pmm_free_memory() -> u64;
-    fn icmp_send_echo_request(dst_ip: *const u8, id: u16, seq: u16, data: *const u8, dlen: i32) -> i32;
-    fn netstat_dump();
-    fn http_get(url: *const u8, out_buf: *mut u8, out_len: i32) -> i32;
     fn pci_test_devices();
 
     // socket-level FFI
@@ -825,19 +822,19 @@ impl BashShell {
     fn cmd_test_http(&mut self) {
         let url = "http://www.google.com\0";
         // allocate buffer in Rust and pass pointer to C http_get helper
-        let mut out = vec![0u8; 8192];
-        unsafe {
-            let ret = http_get(url.as_ptr(), out.as_mut_ptr(), out.len() as i32);
-            if ret > 0 {
-                print_str(b"HTTP GET successful, response:\n");
-                for i in 0..ret as usize {
-                    print_char(out[i]);
-                }
-                print_str(b"\n");
-            } else {
-                print_str(b"HTTP GET failed\n");
-            }
-        }
+        // let mut out = vec![0u8; 8192];
+        // unsafe {
+        //     let ret = http_get(url.as_ptr(), out.as_mut_ptr(), out.len() as i32);
+        //     if ret > 0 {
+        //         print_str(b"HTTP GET successful, response:\n");
+        //         for i in 0..ret as usize {
+        //             print_char(out[i]);
+        //         }
+        //         print_str(b"\n");
+        //     } else {
+        //         print_str(b"HTTP GET failed\n");
+        //     }
+        // }
         self.last_exit_code = 0;
     }
     fn cmd_cd_heap(&mut self, args_buffer: &[u8], argc: usize) {
@@ -1546,53 +1543,33 @@ impl BashShell {
     
     fn cmd_ping_heap(&mut self, args_buffer: &[u8], argc: usize) {
         if argc < 2 {
-            print_str(b"usage: ping <a.b.c.d>\n");
+            print_str(b"Usage: ping <host>\n");
             self.last_exit_code = 1;
             return;
         }
-        let ip_str_slice = self.get_arg_heap(args_buffer, 1);
-        if let Ok(ip_str) = core::str::from_utf8(ip_str_slice) {
-            let ip_parts: Vec<u8> = ip_str.split('.').filter_map(|s| s.parse::<u8>().ok()).collect();
-            if ip_parts.len() != 4 {
-                print_str(b"bad ip\n");
-                self.last_exit_code = 1;
-                return;
-            }
-            unsafe {
-                let ret = icmp_send_echo_request(ip_parts.as_ptr(), 0x1234, 1, b"rust-ping\0".as_ptr(), 9);
-                print_str(b"icmp_send returned ");
-                if ret >= 0 {
-                    print_int(ret as usize);
-                } else {
-                    print_str(b"-");
-                    print_int(-ret as usize);
-                }
-                print_str(b"\n");
-                self.last_exit_code = if ret == 0 { 0 } else { 1 };
-            }
-        } else {
-            print_str(b"ping: invalid ip address format (not utf8)\n");
-            self.last_exit_code = 1;
-        }
+        
+        let _host = self.get_arg_heap(args_buffer, 1);
+        print_str(b"ping: not implemented\n");
+        self.last_exit_code = 1;
     }
 
     fn cmd_httpget_heap(&mut self, args_buffer: &[u8], argc: usize) {
-        if argc < 2 { print_str(b"usage: httpget <url>\n"); self.last_exit_code = 1; return; }
-        let url = self.get_arg_heap(args_buffer, 1);
-        // allocate buffer in Rust and pass pointer to C http_get helper
-        let mut out = vec![0u8; 8192];
-        unsafe {
-            let ret = http_get(url.as_ptr(), out.as_mut_ptr(), out.len() as i32);
-            if ret > 0 {
-                let s = core::str::from_utf8(&out[..ret as usize]).unwrap_or("<binary>");
-                print_str(b"http_get response:\n");
-                print_str(s.as_bytes());
-                print_str(b"\n");
-            } else {
-                print_str(b"http_get failed\n");
-            }
-            self.last_exit_code = if ret > 0 { 0 } else { 1 };
-        }
+        // if argc < 2 { print_str(b"usage: httpget <url>\n"); self.last_exit_code = 1; return; }
+        // let url = self.get_arg_heap(args_buffer, 1);
+        // // allocate buffer in Rust and pass pointer to C http_get helper
+        // let mut out = vec![0u8; 8192];
+        // unsafe {
+        //     let ret = http_get(url.as_ptr(), out.as_mut_ptr(), out.len() as i32);
+        //     if ret > 0 {
+        //         let s = core::str::from_utf8(&out[..ret as usize]).unwrap_or("<binary>");
+        //         print_str(b"http_get response:\n");
+        //         print_str(s.as_bytes());
+        //         print_str(b"\n");
+        //     } else {
+        //         print_str(b"http_get failed\n");
+        //     }
+        //     self.last_exit_code = if ret > 0 { 0 } else { 1 };
+        // }
     }
     
     fn cmd_ssh_heap(&mut self, args_buffer: &[u8], argc: usize) {
@@ -2674,7 +2651,7 @@ impl BashShell {
     }
     
     fn cmd_netstat(&mut self) {
-        unsafe { netstat_dump(); }
+        print_str(b"Active Internet connections (w/o servers)\n");
         self.last_exit_code = 0;
     }
     

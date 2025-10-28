@@ -4,10 +4,8 @@
 #include "heap.h"
 #include "timer.h"
 #include "keyboard.h"
-#include "http.h"
 #include "serial.h"
 #include "vfs.h"
-#include "net.h"
 #include "task.h"
 #include "syscall.h"
 #include "blockdev.h" // Needed for blockdev_get in Rust FFI
@@ -229,27 +227,13 @@ void kernel_main(uint64_t mb2_info_ptr) {
 
     // Device framework + Network devices
     extern void device_framework_init(void);
-    extern void netdev_init(void);
-    extern void arp_init(void);
-    extern void icmp_init(void);
-    extern void tcp_init(void);
     device_framework_init();
-    arp_init();
-    icmp_init();
-    tcp_init();
 
     // PCI bus
     extern void pci_init(void);
     pci_init();
     __asm__ volatile("" ::: "memory");
     
-    // Network
-    netdev_init();
-    struct ip_addr ip = (struct ip_addr){{10, 0, 2, 15}};
-    net_init(ip);
-    /* Periodically poll NIC RX to feed network stack */
-    extern void net_poll_rx(void);
-    timer_register_periodic(net_poll_rx, 10);
     // Multitasking    
     task_init();
     // VFS
@@ -329,22 +313,6 @@ void kernel_main(uint64_t mb2_info_ptr) {
     // Initialize bash shell
     serial_write("[CORE] Syscalls and Scheduler initialized.\n");
     rust_bash_init();
-
-    // const char* url = "http://www.google.com\0";
-    // unsigned char out[8192];  // buffer for response
-
-    // int ret = http_get(url, out, sizeof(out));
-    // if (ret > 0) {
-    //     serial_write("HTTP GET successful, response:\n");
-    //     for (int i = 0; i < ret; i++) {
-    //         unsigned char s[2] = { out[i], 0 };
-    //         serial_write((const char*)s);
-    //     }
-    //     serial_write("\n");
-    // } else {
-    //     serial_write("HTTP GET failed\n");
-    // }
-
     rust_bash_run();
     rust_vga_print("\n");
 }

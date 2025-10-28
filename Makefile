@@ -5,7 +5,7 @@ LD = x86_64-elf-ld
 CFLAGS = -ffreestanding -fno-pie -nostdlib -mno-red-zone -Wall -Wextra -std=c11 -O2 -Ikernel
 ASFLAGS = -f elf64
 
-KERNEL_SOURCES = kernel/kernel.c kernel/vga.c kernel/gdt.c kernel/idt.c kernel/memory.c kernel/multiboot.c kernel/pmm.c kernel/paging.c kernel/heap.c kernel/timer.c kernel/rtc.c kernel/keyboard.c kernel/serial.c kernel/pkg.c kernel/rtl8139.c kernel/net.c kernel/device.c kernel/netdev.c kernel/arp.c kernel/icmp.c kernel/tcp.c kernel/http.c kernel/socket.c kernel/task.c kernel/syscall.c kernel/fat.c kernel/ext2.c kernel/blockdev.c kernel/helpers.c kernel/pci.c kernel/security.c kernel/acl.c kernel/service.c kernel/admin.c
+KERNEL_SOURCES = kernel/kernel.c kernel/vga.c kernel/gdt.c kernel/idt.c kernel/memory.c kernel/multiboot.c kernel/pmm.c kernel/paging.c kernel/heap.c kernel/timer.c kernel/rtc.c kernel/keyboard.c kernel/serial.c kernel/pkg.c kernel/device.c kernel/task.c kernel/syscall.c kernel/fat.c kernel/ext2.c kernel/blockdev.c kernel/helpers.c kernel/pci.c kernel/security.c kernel/acl.c kernel/service.c kernel/admin.c
 KERNEL_OBJECTS = $(KERNEL_SOURCES:.c=.o) kernel/vfs_stubs.o
 
 # Rust specific variables

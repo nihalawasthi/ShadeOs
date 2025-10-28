@@ -109,31 +109,6 @@ static void shell_help() {
     vga_print("Type 'help' in the bash shell for available commands.\n");
 }
 
-// Execute a single command using the Rust bash implementation
-int shell_execute_command(const char* command) {
-    // Simple built-in 'ping' command for userland ICMP test
-    if (strncmp(command, "ping ", 5) == 0) {
-        // Format: ping <ip> [size]
-        const char* arg = command + 5;
-        int ip1, ip2, ip3, ip4, size = 32;
-        if (sscanf(arg, "%d.%d.%d.%d %d", &ip1, &ip2, &ip3, &ip4, &size) < 4) {
-            vga_print("Usage: ping <ip> [size]\n");
-            return -1;
-        }
-        if (size < 0 || size > 1400) size = 32;
-        uint8_t ip[4] = {ip1, ip2, ip3, ip4};
-        uint8_t payload[1400];
-        for (int i = 0; i < size; ++i) payload[i] = (uint8_t)(0x41 + (i % 26));
-        vga_print("[SHELL] Sending ICMP echo request...\n");
-        int ret = icmp_send_echo_request(ip, 0xBEEF, 1, payload, size);
-        vga_print("[SHELL] icmp_send_echo_request returned: ");
-        char buf[16];
-        snprintf(buf, sizeof(buf), "%d\n", ret);
-        vga_print(buf);
-        return ret;
-    }
-    return rust_bash_execute(command);
-}
 
 void shell_readline(char* buf, int maxlen) {
     if (!buf) {
