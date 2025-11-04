@@ -44,14 +44,6 @@
 - Shell commands for testing (ext2-test)
 - Block device integration with existing VFS layer
 
-### 6. Network Stack & TCP/IP Implementation ✅ DONE
-- Full TCP/IP stack with proper connection handling
-- TCP SYN-ACK response handling and connection state management
-- TCP retransmission, connection queues, and proper handshake
-- IPv4, ARP, ICMP, UDP with checksums, complete TCP implementation
-- Socket API (UDP/TCP) with blocking/non-blocking modes
-- Network utilities and debugging tools
-
 ### 7. Device Driver Framework ✅ DONE
 - Complete PCI bus enumeration and device discovery
 - PCI BAR mapping and resource allocation
@@ -67,6 +59,15 @@
 - Performance benchmark plan added (docs/performance.md)
 
 ## 🔄 IN PROGRESS TASKS (0/16)
+
+### 6. Network Stack & TCP/IP Implementation ✅ DONE
+- Full TCP/IP stack with proper connection handling
+- TCP SYN-ACK response handling and connection state management
+- TCP retransmission, connection queues, and proper handshake
+- IPv4, ARP, ICMP, UDP with checksums, complete TCP implementation
+- Socket API (UDP/TCP) with blocking/non-blocking modes
+- Network utilities and debugging tools
+
 ### 8. Inter-Process Communication (IPC) 🔄 IN PROGRESS
 - **NEEDED**: Anonymous Pipes
 - **NEEDED**: Named pipes (FIFOs)

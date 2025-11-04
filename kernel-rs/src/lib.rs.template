@@ -28,6 +28,11 @@ pub mod ext2;
 pub mod vga;
 pub mod syscalls;
 pub mod serial;
+pub mod rtl8139;
+pub mod e1000;
+pub mod pcnet;
+pub mod pci_net;
+pub mod network;
 
 use alloc::alloc::GlobalAlloc;
 

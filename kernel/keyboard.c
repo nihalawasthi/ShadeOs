@@ -131,6 +131,13 @@ void initialize_keyboard() {
     vga_print("PS/2 config byte.\n");
 
     vga_print("Keyboard ready to go!\n\n");
+    
+    // Register the interrupt handler AFTER all initialization
+    // This prevents potential page faults if handler is called too early
+    register_interrupt_handler(IRQ1, keyboard_interrupt_handler);
+    
+    // Small delay to ensure everything is stable (especially for VMware)
+    for (volatile int i = 0; i < 10000; i++);
 }
 
 // This function now calls into the Rust keyboard module

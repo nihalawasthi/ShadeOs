@@ -317,55 +317,53 @@ impl ProcessManager {
         }
         
         for process in &self.processes {
-            unsafe {
-                let mut msg = [0u8; 128];
-                let mut i = 0;
-                
-                // PID
-                let mut temp_pid = process.pid;
-                let mut digits = [0u8; 10];
-                let mut d = 0;
-                if temp_pid == 0 { digits[d] = b'0'; d += 1; }
-                while temp_pid > 0 {
-                    digits[d] = b'0' + (temp_pid % 10) as u8;
-                    temp_pid /= 10;
-                    d += 1;
-                }
-                for j in (0..d).rev() { if i < msg.len() - 3 { msg[i] = digits[j]; i += 1; } }
-                msg[i] = b'\t'; i += 1;
-                
-                // PPID
-                let mut temp_ppid = process.parent_pid;
-                d = 0;
-                if temp_ppid == 0 { digits[d] = b'0'; d += 1; }
-                while temp_ppid > 0 {
-                    digits[d] = b'0' + (temp_ppid % 10) as u8;
-                    temp_ppid /= 10;
-                    d += 1;
-                }
-                for j in (0..d).rev() { if i < msg.len() - 3 { msg[i] = digits[j]; i += 1; } }
-                msg[i] = b'\t'; i += 1;
-                
-                // State
-                let state_str = match process.state {
-                    ProcessState::Ready => b"Ready     ",
-                    ProcessState::Running => b"Running   ",
-                    ProcessState::Blocked => b"Blocked   ",
-                    ProcessState::Zombie => b"Zombie    ",
-                    ProcessState::Terminated => b"Terminated",
-                };
-                for &b in state_str { if i < msg.len() - 3 { msg[i] = b; i += 1; } }
-                
-                // Privilege
-                let priv_str = match process.privilege_level {
-                    PrivilegeLevel::Kernel => b"Kernel ",
-                    PrivilegeLevel::User => b"User   ",
-                };
-                for &b in priv_str { if i < msg.len() - 3 { msg[i] = b; i += 1; } }
-                
-                msg[i] = 0;
-                //serial_write(msg.as_ptr());
+            let mut msg = [0u8; 128];
+            let mut i = 0;
+            
+            // PID
+            let mut temp_pid = process.pid;
+            let mut digits = [0u8; 10];
+            let mut d = 0;
+            if temp_pid == 0 { digits[d] = b'0'; d += 1; }
+            while temp_pid > 0 {
+                digits[d] = b'0' + (temp_pid % 10) as u8;
+                temp_pid /= 10;
+                d += 1;
             }
+            for j in (0..d).rev() { if i < msg.len() - 3 { msg[i] = digits[j]; i += 1; } }
+            msg[i] = b'\t'; i += 1;
+            
+            // PPID
+            let mut temp_ppid = process.parent_pid;
+            d = 0;
+            if temp_ppid == 0 { digits[d] = b'0'; d += 1; }
+            while temp_ppid > 0 {
+                digits[d] = b'0' + (temp_ppid % 10) as u8;
+                temp_ppid /= 10;
+                d += 1;
+            }
+            for j in (0..d).rev() { if i < msg.len() - 3 { msg[i] = digits[j]; i += 1; } }
+            msg[i] = b'\t'; i += 1;
+            
+            // State
+            let state_str = match process.state {
+                ProcessState::Ready => b"Ready     ",
+                ProcessState::Running => b"Running   ",
+                ProcessState::Blocked => b"Blocked   ",
+                ProcessState::Zombie => b"Zombie    ",
+                ProcessState::Terminated => b"Terminated",
+            };
+            for &b in state_str { if i < msg.len() - 3 { msg[i] = b; i += 1; } }
+            
+            // Privilege
+            let priv_str = match process.privilege_level {
+                PrivilegeLevel::Kernel => b"Kernel ",
+                PrivilegeLevel::User => b"User   ",
+            };
+            for &b in priv_str { if i < msg.len() - 3 { msg[i] = b; i += 1; } }
+            
+            msg[i] = 0;
+            //serial_write(msg.as_ptr());
         }
     }
 }

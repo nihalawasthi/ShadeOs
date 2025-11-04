@@ -37,7 +37,6 @@
 /kernel/*.d
 /kernel-rs/target/*
 /kernel-rs/src/lib.rs
-/kernel-rs/Cargo.toml
 /scripts/*.log
 /scripts/*.tmp
 /*.pem

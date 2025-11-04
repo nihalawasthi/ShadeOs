@@ -233,6 +233,9 @@ void kernel_main(uint64_t mb2_info_ptr) {
     extern void pci_init(void);
     pci_init();
     __asm__ volatile("" ::: "memory");
+    // Initialize network from PCI
+    extern int network_init_from_pci(void);
+    network_init_from_pci();
     
     // Multitasking    
     task_init();

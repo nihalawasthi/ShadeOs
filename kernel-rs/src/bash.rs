@@ -1542,34 +1542,129 @@ impl BashShell {
     }
     
     fn cmd_ping_heap(&mut self, args_buffer: &[u8], argc: usize) {
+        extern "C" { fn net_icmp_ping(ip: *const u8, timeout_ms: i32) -> i32; }
+
         if argc < 2 {
-            print_str(b"Usage: ping <host>\n");
+            print_str(b"Usage: ping <ipv4> [timeout_ms]\n");
             self.last_exit_code = 1;
             return;
         }
-        
-        let _host = self.get_arg_heap(args_buffer, 1);
-        print_str(b"ping: not implemented\n");
-        self.last_exit_code = 1;
+
+        let host = self.get_arg_heap(args_buffer, 1);
+
+        // Parse dotted-quad IPv4 only for now
+        let mut ip = [0u8; 4];
+        let mut part = 0usize;
+        let mut val: u32 = 0;
+        let mut saw_digit = false;
+        for &b in host {
+            if b >= b'0' && b <= b'9' {
+                saw_digit = true;
+                val = val * 10 + (b - b'0') as u32;
+                if val > 255 { print_str(b"ping: invalid ip\n"); self.last_exit_code = 1; return; }
+            } else if b == b'.' {
+                if part >= 4 || !saw_digit { print_str(b"ping: invalid ip\n"); self.last_exit_code = 1; return; }
+                ip[part] = val as u8;
+                part += 1;
+                val = 0;
+                saw_digit = false;
+            } else {
+                print_str(b"ping: invalid ip\n");
+                self.last_exit_code = 1;
+                return;
+            }
+        }
+        if part != 3 || !saw_digit { print_str(b"ping: invalid ip\n"); self.last_exit_code = 1; return; }
+        ip[3] = val as u8;
+
+        // Optional timeout
+        let timeout_ms: i32 = if argc > 2 {
+            parse_int(self.get_arg_heap(args_buffer, 2)).unwrap_or(1000)
+        } else { 1000 };
+
+        let rtt = unsafe { net_icmp_ping(ip.as_ptr(), timeout_ms) };
+        if rtt >= 0 {
+            print_str(b"64 bytes from ");
+            print_str(host);
+            print_str(b": icmp_seq=0 ttl=64 time=");
+            print_int(rtt as usize);
+            print_str(b" ms\n");
+            self.last_exit_code = 0;
+        } else {
+            print_str(b"Request timeout for icmp_seq 0\n");
+            self.last_exit_code = 1;
+        }
     }
 
     fn cmd_httpget_heap(&mut self, args_buffer: &[u8], argc: usize) {
-        // if argc < 2 { print_str(b"usage: httpget <url>\n"); self.last_exit_code = 1; return; }
-        // let url = self.get_arg_heap(args_buffer, 1);
-        // // allocate buffer in Rust and pass pointer to C http_get helper
-        // let mut out = vec![0u8; 8192];
-        // unsafe {
-        //     let ret = http_get(url.as_ptr(), out.as_mut_ptr(), out.len() as i32);
-        //     if ret > 0 {
-        //         let s = core::str::from_utf8(&out[..ret as usize]).unwrap_or("<binary>");
-        //         print_str(b"http_get response:\n");
-        //         print_str(s.as_bytes());
-        //         print_str(b"\n");
-        //     } else {
-        //         print_str(b"http_get failed\n");
-        //     }
-        //     self.last_exit_code = if ret > 0 { 0 } else { 1 };
-        // }
+        extern "C" {
+            fn sock_socket() -> i32;
+            fn sock_connect(s: i32, ip: *const u8, port: u16) -> i32;
+            fn sock_send(s: i32, buf: *const u8, len: usize) -> isize;
+            fn sock_recv(s: i32, buf: *mut u8, len: usize) -> isize;
+            fn sock_close(s: i32) -> i32;
+            fn network_poll();
+        }
+
+        if argc < 2 {
+            print_str(b"usage: httpget <ipv4> [path]\n");
+            self.last_exit_code = 1;
+            return;
+        }
+
+        let host = self.get_arg_heap(args_buffer, 1);
+        let path = if argc > 2 { self.get_arg_heap(args_buffer, 2) } else { b"/" };
+
+        // Parse IPv4 dotted quad
+        let mut ip = [0u8; 4];
+        let mut part = 0usize; let mut val: u32 = 0; let mut saw_digit = false;
+        for &b in host {
+            if b >= b'0' && b <= b'9' { saw_digit = true; val = val * 10 + (b - b'0') as u32; if val > 255 { print_str(b"httpget: invalid ip\n"); self.last_exit_code = 1; return; } }
+            else if b == b'.' { if part >= 4 || !saw_digit { print_str(b"httpget: invalid ip\n"); self.last_exit_code = 1; return; } ip[part]=val as u8; part+=1; val=0; saw_digit=false; }
+            else { print_str(b"httpget: invalid ip\n"); self.last_exit_code = 1; return; }
+        }
+        if part != 3 || !saw_digit { print_str(b"httpget: invalid ip\n"); self.last_exit_code = 1; return; }
+        ip[3] = val as u8;
+
+        let s = unsafe { sock_socket() };
+        if s < 0 { print_str(b"httpget: socket failed\n"); self.last_exit_code = 1; return; }
+
+        let rc = unsafe { sock_connect(s, ip.as_ptr(), 80) };
+        if rc != 0 { print_str(b"httpget: connect failed\n"); unsafe { sock_close(s); } self.last_exit_code = 1; return; }
+
+        // Build request
+        let mut req = [0u8; 256];
+        let prefix = b"GET ";
+        let suffix = b" HTTP/1.0\r\nHost: ";
+        let end = b"\r\nConnection: close\r\n\r\n";
+        let mut pos = 0;
+        for &b in prefix { if pos < req.len() { req[pos]=b; pos+=1; } }
+        for &b in path { if pos < req.len() && b != 0 { req[pos]=b; pos+=1; } }
+        for &b in suffix { if pos < req.len() { req[pos]=b; pos+=1; } }
+        for &b in host { if pos < req.len() && b != 0 { req[pos]=b; pos+=1; } }
+        for &b in end { if pos < req.len() { req[pos]=b; pos+=1; } }
+
+        let sent = unsafe { sock_send(s, req.as_ptr(), pos) };
+        if sent <= 0 { print_str(b"httpget: send failed\n"); unsafe { sock_close(s); } self.last_exit_code = 1; return; }
+
+        // Receive a chunk
+        let mut buf = [0u8; 2048];
+        let mut total = 0isize;
+        for _ in 0..50 { // poll/read loop
+            unsafe { network_poll(); }
+            let n = unsafe { sock_recv(s, buf.as_mut_ptr(), buf.len()) };
+            if n > 0 {
+                total += n;
+                let slice = &buf[..n as usize];
+                print_str(slice);
+            } else {
+                // no data yet, small pause
+                unsafe { extern "C" { fn pause(); } pause(); }
+            }
+        }
+        print_str(b"\n");
+        unsafe { sock_close(s); }
+        self.last_exit_code = if total > 0 { 0 } else { 1 };
     }
     
     fn cmd_ssh_heap(&mut self, args_buffer: &[u8], argc: usize) {

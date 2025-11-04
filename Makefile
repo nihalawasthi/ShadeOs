@@ -5,7 +5,7 @@ LD = x86_64-elf-ld
 CFLAGS = -ffreestanding -fno-pie -nostdlib -mno-red-zone -Wall -Wextra -std=c11 -O2 -Ikernel
 ASFLAGS = -f elf64
 
-KERNEL_SOURCES = kernel/kernel.c kernel/vga.c kernel/gdt.c kernel/idt.c kernel/memory.c kernel/multiboot.c kernel/pmm.c kernel/paging.c kernel/heap.c kernel/timer.c kernel/rtc.c kernel/keyboard.c kernel/serial.c kernel/pkg.c kernel/device.c kernel/task.c kernel/syscall.c kernel/fat.c kernel/ext2.c kernel/blockdev.c kernel/helpers.c kernel/pci.c kernel/security.c kernel/acl.c kernel/service.c kernel/admin.c
+KERNEL_SOURCES = kernel/kernel.c kernel/vga.c kernel/gdt.c kernel/idt.c kernel/memory.c kernel/multiboot.c kernel/pmm.c kernel/paging.c kernel/heap.c kernel/timer.c kernel/rtc.c kernel/keyboard.c kernel/serial.c kernel/pkg.c kernel/device.c kernel/task.c kernel/syscall.c kernel/fat.c kernel/ext2.c kernel/blockdev.c kernel/helpers.c kernel/pci.c kernel/security.c kernel/acl.c kernel/service.c kernel/admin.c kernel/netinit.c
 KERNEL_OBJECTS = $(KERNEL_SOURCES:.c=.o) kernel/vfs_stubs.o
 
 # Rust specific variables
@@ -63,6 +63,7 @@ $(RUST_LIB):
 	@echo '' >> kernel-rs/Cargo.toml
 	@echo '[dependencies]' >> kernel-rs/Cargo.toml
 	@echo 'spin = "0.9.8"' >> kernel-rs/Cargo.toml
+	@echo 'smoltcp = { version = "0.11", default-features = false, features = ["proto-ipv4", "proto-dhcpv4", "socket-tcp", "socket-udp", "socket-icmp", "medium-ethernet", "alloc"] }' >> kernel-rs/Cargo.toml
 	@mkdir -p kernel-rs/src
 	@if [ ! -f kernel-rs/src/lib.rs ]; then \
 		cp kernel-rs/src/lib.rs.template kernel-rs/src/lib.rs; \
