@@ -63,6 +63,9 @@ long get_load15() { return load15; }
 void timer_interrupt_handler() {
     timer_ticks++;
 
+    // Poll network stack every timer tick for responsiveness
+    extern void network_poll(void);
+    network_poll();
     
     uint64_t current_ms = kernel_uptime_ms();
     for (int i = 0; i < num_periodic_timers; i++) {

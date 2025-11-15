@@ -1,6 +1,7 @@
 #include "kernel.h"
 #include "pci.h"
 #include "serial.h"
+#include "paging.h"
 
 // PCI Vendor IDs
 #define VENDOR_REALTEK  0x10EC
@@ -77,6 +78,10 @@ int network_init_from_pci(void) {
         mem_base = bar1 & 0xFFFFFFF0;
         snprintf(log_buf, sizeof(log_buf), "[NETINIT] Memory Base (BAR1): 0x%lx\n", mem_base);
         serial_write(log_buf);
+    }
+    
+    if (mem_base) {
+        map_mmio(mem_base, 128 * 1024);
     }
     
     // Initialize the device through Rust

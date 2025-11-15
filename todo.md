@@ -141,17 +141,42 @@
 
 ## 🐛 RECENT FIXES (Latest Session)
 
-- ✅ **TCP Connection Handshake Completed**: Fixed SYN-ACK response handling in tcp_input_ipv4()
+- ✅ **Network Stack Fixed - ARP & TCP Working**: Complete network stack overhaul for reliable operation
+  - **Root Cause**: Missing continuous polling - smoltcp requires regular polling for packet processing
+  - **Interface Configuration**: Added random_seed to config for proper smoltcp operation (neighbor cache is built-in)
+  - **Continuous Polling**: Added network_poll() to timer interrupt (100Hz) for background packet processing
+  - **Interrupt Management**: Added STI instruction in poll() to ensure timer interrupts are enabled
+  - **Fixed Hanging Issue**: Replaced pause() (HLT) calls with spin_loop() to prevent CPU halting during critical polling
+  - **ICMP Ping Improvements**: 
+    - Reduced initial ARP polling from 50 to 20 iterations to prevent hanging
+    - Added periodic yields with spin_loop() to allow timer interrupts
+    - Multi-poll per iteration (5x) for better responsiveness
+    - Increased retries from 3 to 5 with 200ms intervals
+  - **TCP Connection Fixes**:
+    - Reduced initial ARP polling from 50 to 20 iterations
+    - Added periodic yields during connection establishment
+    - Enhanced tcp_send() with proper connection establishment waiting
+    - Increased timeouts and polling frequency
+    - Added both may_send() and can_send() checks
+  - **Driver Fixes**:
+    - RTL8139: Added RX buffer size configuration (RCR_RBLEN_8K)
+    - E1000: Fixed RX tail pointer update logic
+  - **Files Modified**: kernel-rs/src/network.rs, kernel-rs/src/rtl8139.rs, kernel-rs/src/e1000.rs, kernel/timer.c
+  - **Result**: Ping and TCP (httpget) now working on both QEMU (E1000) and VMware (RTL8139)
+
+- ✅ **TCP Connection Handshake Completed** (Previous Session): Fixed SYN-ACK response handling in tcp_input_ipv4()
   - Proper connection state transitions from SYN_SENT to ESTABLISHED
   - Complete 3-way handshake: SYN → SYN-ACK → ACK
   - Connection timeout issues resolved with proper state management
   - Data transfer and connection teardown now working correctly
-- ✅ **PCI Bus Enumeration Implemented**: Complete PCI device discovery and configuration
+
+- ✅ **PCI Bus Enumeration Implemented** (Previous Session): Complete PCI device discovery and configuration
   - Automatic scanning of all PCI buses and devices
   - BAR mapping and resource allocation for I/O ports and memory regions
   - Device enabling with proper command register configuration
   - Integration with device framework for automatic driver binding
-- ✅ **RTL8139 Driver Enhanced**: Updated to use PCI-discovered resources
+
+- ✅ **RTL8139 Driver Enhanced** (Previous Session): Updated to use PCI-discovered resources
   - Dynamic I/O base address detection via PCI BAR0
   - Removed hardcoded port addresses in favor of PCI enumeration
   - Proper device initialization with PCI-provided resources

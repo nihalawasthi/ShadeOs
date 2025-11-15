@@ -173,6 +173,13 @@ void paging_free_pml4(uint64_t pml4_phys) {
     free_page((void*)pml4_phys); // Free PML4 itself
 }
 
+void map_mmio(uint64_t phys_addr, uint64_t size) {
+    uint64_t flags = PAGE_PRESENT | PAGE_RW | PAGE_PWT | PAGE_PCD;
+    for (uint64_t addr = phys_addr; addr < phys_addr + size; addr += PAGE_SIZE) {
+        map_page(addr, addr, flags);
+    }
+}
+
 // FFI wrappers for Rust
 uint64_t rust_paging_new_pml4() {
     return paging_new_pml4();

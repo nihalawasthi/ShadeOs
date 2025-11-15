@@ -36,6 +36,10 @@ const RCR_APM: u32 = 0x02; // Accept physical match
 const RCR_AM: u32 = 0x04;  // Accept multicast
 const RCR_AB: u32 = 0x08;  // Accept broadcast
 const RCR_WRAP: u32 = 0x80; // Wrap at end of buffer
+const RCR_RBLEN_8K: u32 = 0x00; // 8K+16 RX buffer (bits 11-12 = 00)
+const RCR_RBLEN_16K: u32 = 0x01 << 11; // 16K+16 RX buffer
+const RCR_RBLEN_32K: u32 = 0x02 << 11; // 32K+16 RX buffer
+const RCR_RBLEN_64K: u32 = 0x03 << 11; // 64K+16 RX buffer
 
 // Transmit Configuration
 const TCR_IFG: u32 = 0x03000000; // Interframe gap
@@ -50,6 +54,8 @@ extern "C" {
     fn pmm_alloc_page() -> u64;
     fn pmm_free_page(addr: u64);
     fn serial_write(s: *const u8);
+    fn serial_write_dec(s: *const u8, n: u64);
+    fn serial_write_str(s: *const u8);
 }
 
 pub struct Rtl8139Device {
@@ -187,31 +193,54 @@ impl Rtl8139Device {
             self.outb(REG_CONFIG1, 0x00);
 
             // Software reset
+            serial_write(b"[RTL8139] Performing software reset...\n\0".as_ptr());
             self.outb(REG_CMD, CMD_RESET);
             while (self.inb(REG_CMD) & CMD_RESET) != 0 {
                 core::hint::spin_loop();
             }
+            serial_write(b"[RTL8139] Reset complete\n\0".as_ptr());
 
             // Read MAC address
             for i in 0..6 {
                 self.mac_address[i] = self.inb(REG_MAC0 + i as u16);
             }
+            serial_write(b"[RTL8139] MAC address read\n\0".as_ptr());
 
             // Set RX buffer
+            serial_write(b"[RTL8139] Setting RX buffer addr=\0".as_ptr());
+            serial_write_dec(b"\n\0".as_ptr(), self.rx_buffer as u64);
             self.outl(REG_RBSTART, self.rx_buffer as u32);
+            
+            // Verify RX buffer was set
+            let rb_verify = self.inl(REG_RBSTART);
+            serial_write(b"[RTL8139] RX buffer verify read back=\0".as_ptr());
+            serial_write_dec(b"\n\0".as_ptr(), rb_verify as u64);
+            
+            // Reset CAPR (Current Address of Packet Read) - CRITICAL!
+            serial_write(b"[RTL8139] Resetting CAPR\n\0".as_ptr());
+            self.outw(REG_CAPR, 0xFFF0); // Start at beginning, -0x10 offset
 
             // Set IMR + ISR
+            serial_write(b"[RTL8139] Configuring interrupts\n\0".as_ptr());
             self.outw(REG_IMR, INT_ROK | INT_TOK | INT_RER | INT_TER);
             self.outw(REG_ISR, 0xFFFF); // Clear all interrupts
 
-            // Configure receive
-            self.outl(REG_RCR, RCR_AAP | RCR_APM | RCR_AM | RCR_AB | RCR_WRAP);
+            // Configure receive - use 8K+16 buffer size
+            serial_write(b"[RTL8139] Configuring RX\n\0".as_ptr());
+            self.outl(REG_RCR, RCR_AAP | RCR_APM | RCR_AM | RCR_AB | RCR_WRAP | RCR_RBLEN_8K);
 
             // Configure transmit
+            serial_write(b"[RTL8139] Configuring TX\n\0".as_ptr());
             self.outl(REG_TCR, TCR_IFG);
 
             // Enable RX and TX
+            serial_write(b"[RTL8139] Enabling RX and TX\n\0".as_ptr());
             self.outb(REG_CMD, CMD_RX_ENABLE | CMD_TX_ENABLE);
+            
+            // Verify command register
+            let cmd_verify = self.inb(REG_CMD);
+            serial_write(b"[RTL8139] CMD register=\0".as_ptr());
+            serial_write_dec(b"\n\0".as_ptr(), cmd_verify as u64);
 
             serial_write(b"[RTL8139] Device initialized successfully\n\0".as_ptr());
         }
@@ -253,48 +282,134 @@ impl Rtl8139Device {
                 return None;
             }
 
+            // Get current buffer read pointer (CAPR) - this is where we last read to
+            let capr = self.inw(REG_CAPR);
+            // Current buffer write pointer - where new data is being written
+            let cbr_raw = self.inw(0x3A); // CBR register  
+
+            serial_write(b"[RTL8139] RX: rx_offset=\0".as_ptr());
+            serial_write_dec(b", CAPR=\0".as_ptr(), self.rx_offset as u64);
+            serial_write_dec(b", CBR=\0".as_ptr(), capr as u64);
+            serial_write_dec(b"\n\0".as_ptr(), cbr_raw as u64);
+
             let offset = self.rx_offset as usize;
+            
+            // Ensure offset is within buffer bounds
+            if offset >= RX_BUFFER_SIZE {
+                serial_write(b"[RTL8139] ERROR: rx_offset out of bounds, resetting\n\0".as_ptr());
+                self.rx_offset = 0;
+                self.outw(REG_CAPR, 0xFFF0);
+                return None;
+            }
+            
             let rx_ptr = self.rx_buffer.add(offset);
 
-            // Read header (4 bytes)
+            // Read header (4 bytes: 2 bytes status, 2 bytes length)
             let header = read_volatile(rx_ptr as *const u32);
             let status = (header & 0xFFFF) as u16;
             let length = ((header >> 16) & 0xFFFF) as u16;
 
+            // Debug: show raw header
+            serial_write(b"[RTL8139] RX Header: status=0x\0".as_ptr());
+            serial_write_dec(b", length=\0".as_ptr(), status as u64);
+            serial_write_dec(b" (includes 4-byte CRC)\n\0".as_ptr(), length as u64);
+
+            // Validate packet status (bit 0 should be set for good packet)
             if (status & 0x01) == 0 {
-                // Not a good packet
-                self.rx_offset = (self.rx_offset + length + 4 + 3) & !3;
+                serial_write(b"[RTL8139] Bad packet status, skipping\n\0".as_ptr());
+                // Skip this packet - align to 4 bytes and update CAPR
+                let packet_len = if length > 0 { length } else { 4 };
+                self.rx_offset = ((self.rx_offset + packet_len + 4 + 3) & !3) & 0xFFFF;
+                if self.rx_offset >= (RX_BUFFER_SIZE as u16) {
+                    self.rx_offset = 0;
+                }
                 self.outw(REG_CAPR, self.rx_offset.wrapping_sub(0x10));
                 return None;
             }
 
-            // Copy packet data
-            let packet_data = core::slice::from_raw_parts(rx_ptr.add(4), length as usize - 4);
-            let mut packet = Vec::with_capacity(packet_data.len());
+            // The length field includes the 4-byte CRC at the end
+            // Packet format: [Header 4 bytes][Ethernet Frame][CRC 4 bytes]
+            // We want to return just the Ethernet frame without the CRC
+            if length < 4 || length > 1518 {
+                serial_write(b"[RTL8139] Invalid packet length=\0".as_ptr());
+                serial_write_dec(b", skipping\n\0".as_ptr(), length as u64);
+                // Skip malformed packet
+                self.rx_offset = ((self.rx_offset + length + 4 + 3) & !3) & 0xFFFF;
+                if self.rx_offset >= (RX_BUFFER_SIZE as u16) {
+                    self.rx_offset = 0;
+                }
+                self.outw(REG_CAPR, self.rx_offset.wrapping_sub(0x10));
+                return None;
+            }
+
+            // Copy packet data excluding the 4-byte CRC
+            // RTL8139 packet format in RX buffer:
+            // [Status:2 bytes][Length:2 bytes][Ethernet frame][CRC: 4 bytes]
+            // The Length field is the size of [Ethernet frame + CRC], NOT including the 4-byte header
+            let data_len = (length - 4) as usize; // Subtract CRC only
+            
+            // Debug: show what we're about to extract
+            serial_write(b"[RTL8139] Extracting from offset \0".as_ptr());
+            serial_write_dec(b", length=\0".as_ptr(), (offset + 4) as u64);
+            serial_write_dec(b", data_len (excl CRC)=\0".as_ptr(), length as u64);
+            serial_write_dec(b"\n\0".as_ptr(), data_len as u64);
+            
+            let packet_data = core::slice::from_raw_parts(rx_ptr.add(4), data_len);
+            
+            // Debug: dump first 20 bytes of extracted packet
+            serial_write(b"[RTL8139] Extracted packet (first 20 bytes): \0".as_ptr());
+            for i in 0..core::cmp::min(20, data_len) {
+                let b = packet_data[i];
+                fn nib(n: u8) -> u8 {
+                    if n < 10 { b'0' + n } else { b'a' + (n - 10) }
+                }
+                let hi = nib((b >> 4) & 0xF);
+                let lo = nib(b & 0xF);
+                let mut buf = [hi, lo, b' ', 0u8];
+                serial_write(buf.as_ptr());
+            }
+            serial_write(b"\n\0".as_ptr());
+            
+            let mut packet = Vec::with_capacity(data_len);
             packet.extend_from_slice(packet_data);
 
-            // Update read pointer
-            self.rx_offset = ((self.rx_offset + length + 4 + 3) & !3) % RX_BUFFER_SIZE as u16;
+            // Update read pointer - align to 4-byte boundary
+            // The +4 accounts for the header, +3 & !3 aligns to 4 bytes
+            let new_offset = ((self.rx_offset + length + 4 + 3) & !3) & 0xFFFF;
+            self.rx_offset = if new_offset >= (RX_BUFFER_SIZE as u16) {
+                0 // Wrap around
+            } else {
+                new_offset
+            };
+            
+            // Update CAPR register (Current Address of Packet Read)
+            // CAPR should be (current_offset - 0x10) to account for the weird RTL8139 behavior
             self.outw(REG_CAPR, self.rx_offset.wrapping_sub(0x10));
 
+            serial_write(b"[RTL8139] Packet RX, len=\0".as_ptr());
+            serial_write_dec(b"\n\0".as_ptr(), packet.len() as u64);
             Some(packet)
         }
     }
 
     pub fn handle_interrupt(&mut self) {
+        unsafe {
+        serial_write(b"[RTL8139] handle_interrupt() called\n\0".as_ptr());
         let isr = self.inw(REG_ISR);
-        
+        serial_write(b"[RTL8139] ISR value=\0".as_ptr());
+        serial_write_dec(b"\n\0".as_ptr(), isr as u64);
         // Clear interrupts
         self.outw(REG_ISR, isr);
 
         if (isr & INT_ROK) != 0 {
-            // Packet received - will be handled by polling
+            serial_write(b"[RTL8139] INT_ROK: Packet received interrupt\n\0".as_ptr());
         }
 
         if (isr & INT_TOK) != 0 {
-            // Packet transmitted
+            serial_write(b"[RTL8139] INT_TOK: Packet transmitted interrupt\n\0".as_ptr());
         }
     }
+}
 }
 
 impl Drop for Rtl8139Device {

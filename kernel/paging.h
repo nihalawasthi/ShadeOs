@@ -21,6 +21,7 @@ uint64_t get_phys_addr(uint64_t virt_addr);
 void map_user_page(uint64_t virt_addr, uint64_t phys_addr);
 uint64_t paging_new_pml4();
 void paging_free_pml4(uint64_t pml4_phys);
+void map_mmio(uint64_t phys_addr, uint64_t size);
 
 #ifdef __cplusplus
 extern "C" {

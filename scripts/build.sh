@@ -7,8 +7,9 @@ echo "=================="
 
 # Clean and build
 make clean
-if make all; then
+if make all -j4; then
     echo "✅ Build successful"
+    make clean
     echo "   Kernel: $(stat -c%s kernel.bin) bytes"
     if [[ -f shadeOS.iso ]]; then
         echo "   ISO: $(stat -c%s shadeOS.iso) bytes"

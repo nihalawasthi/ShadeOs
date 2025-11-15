@@ -63,7 +63,11 @@ $(RUST_LIB):
 	@echo '' >> kernel-rs/Cargo.toml
 	@echo '[dependencies]' >> kernel-rs/Cargo.toml
 	@echo 'spin = "0.9.8"' >> kernel-rs/Cargo.toml
-	@echo 'smoltcp = { version = "0.11", default-features = false, features = ["proto-ipv4", "proto-dhcpv4", "socket-tcp", "socket-udp", "socket-icmp", "medium-ethernet", "alloc"] }' >> kernel-rs/Cargo.toml
+	@echo 'smoltcp = { version = "0.11", default-features = false, features = ["proto-ipv4", "proto-dhcpv4", "proto-dns", "socket-tcp", "socket-udp", "socket-icmp", "socket-dhcpv4", "socket-dns", "medium-ethernet", "alloc"] }' >> kernel-rs/Cargo.toml
+	@echo '' >> kernel-rs/Cargo.toml
+	@echo '[features]' >> kernel-rs/Cargo.toml
+	@echo 'fallback-qemu = []' >> kernel-rs/Cargo.toml
+#	@echo 'net-dump = []' >> kernel-rs/Cargo.toml
 	@mkdir -p kernel-rs/src
 	@if [ ! -f kernel-rs/src/lib.rs ]; then \
 		cp kernel-rs/src/lib.rs.template kernel-rs/src/lib.rs; \
@@ -86,7 +90,7 @@ shadeOS.iso: kernel.bin
 	grub-mkrescue -o shadeOS.iso iso
 
 clean:
-	rm -f *.o kernel/*.o kernel.bin shadeOS.iso
+	rm -f *.o kernel/*.o kernel.bin
 	rm -rf iso
 	rm -rf kernel-rs/target
 	rm -f kernel-rs/Cargo.toml kernel-rs/src/lib.rs

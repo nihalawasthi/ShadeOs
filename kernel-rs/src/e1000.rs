@@ -214,17 +214,66 @@ impl E1000Device {
                 core::hint::spin_loop();
             }
 
-            // Read MAC address from EEPROM
+            // Attempt MAC address from EEPROM first (may fail in some virtualized cases)
             let mac0 = self.read_eeprom(0);
             let mac1 = self.read_eeprom(1);
             let mac2 = self.read_eeprom(2);
+            self.mac_address = [
+                (mac0 & 0xFF) as u8,
+                ((mac0 >> 8) & 0xFF) as u8,
+                (mac1 & 0xFF) as u8,
+                ((mac1 >> 8) & 0xFF) as u8,
+                (mac2 & 0xFF) as u8,
+                ((mac2 >> 8) & 0xFF) as u8,
+            ];
 
-            self.mac_address[0] = (mac0 & 0xFF) as u8;
-            self.mac_address[1] = ((mac0 >> 8) & 0xFF) as u8;
-            self.mac_address[2] = (mac1 & 0xFF) as u8;
-            self.mac_address[3] = ((mac1 >> 8) & 0xFF) as u8;
-            self.mac_address[4] = (mac2 & 0xFF) as u8;
-            self.mac_address[5] = ((mac2 >> 8) & 0xFF) as u8;
+            let mut all_zero = true;
+            for b in &self.mac_address { if *b != 0 { all_zero = false; break; } }
+
+            if all_zero {
+                // Fallback: read Receive Address Registers (RAL/RAH) if EEPROM method failed
+                // RAL0 @ 0x5400, RAH0 @ 0x5404 (bits 0-15 contain upper two bytes when AV is set)
+                let ral0 = self.read_reg(0x5400);
+                let rah0 = self.read_reg(0x5404);
+                self.mac_address[0] = (ral0 & 0xFF) as u8;
+                self.mac_address[1] = ((ral0 >> 8) & 0xFF) as u8;
+                self.mac_address[2] = ((ral0 >> 16) & 0xFF) as u8;
+                self.mac_address[3] = ((ral0 >> 24) & 0xFF) as u8;
+                self.mac_address[4] = (rah0 & 0xFF) as u8;
+                self.mac_address[5] = ((rah0 >> 8) & 0xFF) as u8;
+
+                let mut still_zero = true;
+                for b in &self.mac_address { if *b != 0 { still_zero = false; break; } }
+                if still_zero {
+                    // Final fallback: synthesize a locally administered MAC (02:AA:xx:xx:xx:xx)
+                    // Use bits of mem_base as pseudo-random seed.
+                    let seed = self.mem_base;
+                    self.mac_address = [
+                        0x02, // locally administered, unicast
+                        0xAA,
+                        (seed & 0xFF) as u8,
+                        ((seed >> 8) & 0xFF) as u8,
+                        ((seed >> 16) & 0xFF) as u8,
+                        ((seed >> 24) & 0xFF) as u8,
+                    ];
+                    serial_write(b"[E1000] WARNING: MAC all zeros; synthesizing locally administered MAC\n\0".as_ptr());
+                } else {
+                    serial_write(b"[E1000] MAC read from RAL/RAH registers\n\0".as_ptr());
+                }
+            } else {
+                serial_write(b"[E1000] MAC read from EEPROM\n\0".as_ptr());
+            }
+
+            // Log MAC bytes
+            for i in 0..6 {
+                let hex = self.mac_address[i];
+                let mut buf = [b'[', b'M', b'A', b'C', b' ', b'0' + (i as u8), b':',
+                    b'0' + ((hex >> 4) & 0xF), b'0' + (hex & 0xF), b']', b'\n', 0];
+                // Adjust hex conversion (use A-F for >9)
+                if buf[7] > b'9' { buf[7] = b'A' + (buf[7] - b'0' - 10); }
+                if buf[8] > b'9' { buf[8] = b'A' + (buf[8] - b'0' - 10); }
+                serial_write(buf.as_ptr());
+            }
 
             // Set link up
             self.write_reg(REG_CTRL, self.read_reg(REG_CTRL) | CTRL_SLU | CTRL_ASDE);
@@ -266,8 +315,7 @@ impl E1000Device {
             self.write_reg(REG_TXDESCTAIL, 0);
 
             // Enable receiver
-            self.write_reg(REG_RCTRL, RCTL_EN | RCTL_SBP | RCTL_UPE | RCTL_MPE | 
-                          RCTL_LBM | RCTL_BAM | RCTL_BSIZE | RCTL_SECRC);
+            self.write_reg(REG_RCTRL, RCTL_EN | RCTL_SBP | RCTL_UPE | RCTL_MPE | RCTL_BAM | RCTL_BSIZE | RCTL_SECRC);
 
             // Enable transmitter
             self.write_reg(REG_TCTRL, TCTL_EN | TCTL_PSP | (15 << 4) | (64 << 12));
@@ -323,12 +371,33 @@ impl E1000Device {
             let data = core::slice::from_raw_parts(self.rx_buffers[self.rx_current], length);
             packet.extend_from_slice(data);
 
+            // Basic RX debug dump (first 32 bytes)
+            serial_write(b"[E1000] RX packet len=\n\0".as_ptr());
+            // Print length as decimal digits
+            let mut l = length as u32;
+            let mut digits = [0u8; 12];
+            let mut pos = 0;
+            if l == 0 { digits[pos]=b'0'; pos+=1; } else { while l>0 { digits[pos]=b'0'+(l%10) as u8; l/=10; pos+=1; } }
+            for i in (0..pos).rev() { let mut b=[digits[i],0]; serial_write(b.as_ptr()); }
+            serial_write(b"\n\0".as_ptr());
+            let dump_len = if length < 32 { length } else { 32 };
+            for i in 0..dump_len {
+                let byte = data[i];
+                let hi = byte >> 4; let lo = byte & 0xF;
+                let mut out = [if hi<10 { b'0'+hi } else { b'A'+hi-10 }, if lo<10 { b'0'+lo } else { b'A'+lo-10 }, b' ', 0];
+                serial_write(out.as_ptr());
+            }
+            serial_write(b"\n\0".as_ptr());
+
             // Reset descriptor
             desc.status = 0;
 
-            // Update tail
+            // Move to next descriptor
+            let old_current = self.rx_current;
             self.rx_current = (self.rx_current + 1) % NUM_RX_DESC;
-            self.write_reg(REG_RXDESCTAIL, self.rx_current as u32);
+            
+            // Update tail to the descriptor we just processed (E1000 expects tail to point to last valid descriptor)
+            self.write_reg(REG_RXDESCTAIL, old_current as u32);
 
             Some(packet)
         }

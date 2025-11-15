@@ -37,7 +37,7 @@ Key development notes
 - Toolchain expectations: x86_64-elf cross-compiler, NASM, GRUB tooling, xorriso, QEMU, and Rust nightly with target x86_64-unknown-none. The setup script provisions these on Arch.
 - Rust integration: The C kernel calls into the Rust static library for VFS, shell, some syscalls, and ELF/ext2 features. The Rust side relies on a C-provided allocator (rust_kmalloc/free) and exposes FFI used across the kernel.
 - Boot assets and layout: GRUB looks for /boot/kernel.bin within the ISO (grub.cfg). The linkage script places the multiboot header within the first 32KB and aligns sections appropriately.
-- Networking defaults: The kernel sets IP 10.0.2.15 for use with QEMU’s user networking. For host interaction, typical QEMU gateway is 10.0.2.2.
+  - Networking defaults: DHCP is attempted first. If it fails, by default the stack now remains unconfigured (0.0.0.0) with no gateway. Enabling the Cargo feature `fallback-qemu` restores the legacy hardcoded 10.0.2.15/10.0.2.2 fallback for QEMU user networking.
 
 Points to remember
 - always update todo.md after verifying a change has been successfully made / implemented don't do it before verfying that the change is working

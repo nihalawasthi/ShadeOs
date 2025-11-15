@@ -45,6 +45,7 @@ extern "C" {
     fn sock_set_nonblock(s: i32, nonblock: i32) -> i32;
     fn sock_poll(fds: *mut i32, nfds: i32, events_out: *mut i32, timeout_ms: i32) -> i32;
     fn rtc_get_date(year: *mut i32, month: *mut i32, day: *mut i32, hour: *mut i32, minute: *mut i32, second: *mut i32);
+    fn net_get_config(ip_out: *mut u8, netmask_out: *mut u8, gateway_out: *mut u8, mac_out: *mut u8) -> i32;
 }
 
 // Utility functions
@@ -433,11 +434,7 @@ impl BashShell {
                     serial_write(b"\n\0".as_ptr());
                 }
                 let input_str = get_str(&input);
-                // unsafe {
-                //     serial_write(b"[BASH-DEBUG] input_str len: \0".as_ptr());
-                //     serial_write_dec(b"\0".as_ptr(), input_str.len() as u64);
-                //     serial_write(b"\n\0".as_ptr());
-                // }
+
                 // Only process non-empty, non-whitespace commands
                 let trimmed = input_str.iter().position(|&c| c != b' ' && c != b'\t').map(|start| {
                     let end = input_str.iter().rposition(|&c| c != b' ' && c != b'\t').unwrap_or(start);
@@ -596,8 +593,9 @@ impl BashShell {
             b"free" => self.cmd_free(),//works
             b"df" => self.cmd_df(), //works
             b"mv" => self.cmd_mv_heap(args_slice, argc), //not implemented
-            b"ifconfig" => self.cmd_ifconfig(),//works with default will be able to test soon after tcp implementation
+            b"ifconfig" | b"ipconfig" => self.cmd_ifconfig(),//works with default will be able to test soon after tcp implementation
             b"route" => self.cmd_route(),//works
+            b"nslookup" | b"dig" | b"host" => self.cmd_nslookup_heap(args_slice, argc),
             b"htop" => self.cmd_htop(),//works
             b"lspci" => self.cmd_device(),//works
             b"mount" => self.cmd_mount(),
@@ -1607,13 +1605,35 @@ impl BashShell {
         }
 
         if argc < 2 {
-            print_str(b"usage: httpget <ipv4> [path]\n");
+            print_str(b"usage: httpget <ipv4|hostname> [path]\n");
             self.last_exit_code = 1;
             return;
         }
 
         let host = self.get_arg_heap(args_buffer, 1);
         let path = if argc > 2 { self.get_arg_heap(args_buffer, 2) } else { b"/" };
+
+        // Check if input is a hostname (contains letters) or IP (only digits/dots)
+        let mut is_hostname = false;
+        for &b in host {
+            if (b >= b'a' && b <= b'z') || (b >= b'A' && b <= b'Z') {
+                is_hostname = true;
+                break;
+            }
+        }
+
+        if is_hostname {
+            // Print helpful error message with well-known DNS IPs
+            print_str(b"httpget: DNS resolution not yet implemented\n");
+            print_str(b"Common public DNS servers to try:\n");
+            print_str(b"  Google DNS:     8.8.8.8 or 8.8.4.4\n");
+            print_str(b"  Cloudflare DNS: 1.1.1.1 or 1.0.0.1\n");
+            print_str(b"  Quad9 DNS:      9.9.9.9\n");
+            print_str(b"\nFor now, please use: httpget <ip_address> [path]\n");
+            print_str(b"Example: httpget 142.250.185.46 /\n");
+            self.last_exit_code = 1;
+            return;
+        }
 
         // Parse IPv4 dotted quad
         let mut ip = [0u8; 4];
@@ -2751,17 +2771,190 @@ impl BashShell {
     }
     
     fn cmd_ifconfig(&mut self) {
-        print_str(b"lo: flags=73<UP,LOOPBACK,RUNNING>  mtu 65536\n");
-        print_str(b"        inet 127.0.0.1  netmask 255.0.0.0\n");
-        print_str(b"        loop  txqueuelen 1000  (Local Loopback)\n");
+        unsafe {
+            let mut ip = [0u8; 4];
+            let mut netmask = [0u8; 4];
+            let mut gateway = [0u8; 4];
+            let mut mac = [0u8; 6];
+            
+            let result = net_get_config(
+                ip.as_mut_ptr(),
+                netmask.as_mut_ptr(),
+                gateway.as_mut_ptr(),
+                mac.as_mut_ptr()
+            );
+            
+            if result == 1 {
+                // Network configured
+                print_str(b"eth0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500\n");
+                
+                // Print IP address
+                print_str(b"        inet ");
+                self.print_ip(ip);
+                print_str(b"  netmask ");
+                self.print_ip(netmask);
+                print_str(b"\n");
+                
+                // Print MAC address
+                print_str(b"        ether ");
+                self.print_mac(mac);
+                print_str(b"  txqueuelen 1000  (Ethernet)\n");
+                
+                // Print gateway if configured
+                if gateway[0] != 0 || gateway[1] != 0 || gateway[2] != 0 || gateway[3] != 0 {
+                    print_str(b"        gateway ");
+                    self.print_ip(gateway);
+                    print_str(b"\n");
+                }
+                
+                print_str(b"\n");
+            } else if result == 0 {
+                print_str(b"eth0: network not configured\n\n");
+            } else {
+                print_str(b"eth0: error reading network configuration\n\n");
+            }
+            
+            // Loopback interface
+            print_str(b"lo: flags=73<UP,LOOPBACK,RUNNING>  mtu 65536\n");
+            print_str(b"        inet 127.0.0.1  netmask 255.0.0.0\n");
+            print_str(b"        loop  txqueuelen 1000  (Local Loopback)\n");
+        }
         self.last_exit_code = 0;
     }
     
+    fn print_ip(&self, ip: [u8; 4]) {
+        for i in 0..4 {
+            let num = ip[i];
+            // Print number without trailing null
+            if num >= 100 {
+                let buf = [b'0' + (num / 100), b'0' + ((num / 10) % 10), b'0' + (num % 10), 0];
+                print_str(&buf);
+            } else if num >= 10 {
+                let buf = [b'0' + (num / 10), b'0' + (num % 10), 0];
+                print_str(&buf);
+            } else {
+                let buf = [b'0' + num, 0];
+                print_str(&buf);
+            }
+            if i < 3 {
+                print_str(b".");
+            }
+        }
+    }
+    
+    fn print_mac(&self, mac: [u8; 6]) {
+        for i in 0..6 {
+            // Print each byte as hex
+            let byte = mac[i];
+            let hi = if (byte >> 4) < 10 { b'0' + (byte >> 4) } else { b'a' + (byte >> 4) - 10 };
+            let lo = if (byte & 0xF) < 10 { b'0' + (byte & 0xF) } else { b'a' + (byte & 0xF) - 10 };
+            if i < 5 {
+                let hex = [hi, lo, b':', 0];
+                print_str(&hex);
+            } else {
+                let hex = [hi, lo, 0];
+                print_str(&hex);
+            }
+        }
+    }
+    
     fn cmd_route(&mut self) {
-        print_str(b"Kernel IP routing table\n");
-        print_str(b"Destination     Gateway         Genmask         Flags Metric Ref    Use Iface\n");
-        print_str(b"default         *               0.0.0.0         U     0      0        0 lo\n");
+        unsafe {
+            let mut ip = [0u8; 4];
+            let mut netmask = [0u8; 4];
+            let mut gateway = [0u8; 4];
+            let mut mac = [0u8; 6];
+            
+            let result = net_get_config(
+                ip.as_mut_ptr(),
+                netmask.as_mut_ptr(),
+                gateway.as_mut_ptr(),
+                mac.as_mut_ptr()
+            );
+            
+            print_str(b"Kernel IP routing table\n");
+            print_str(b"Destination     Gateway         Genmask         Flags Metric Ref    Use Iface\n");
+            
+            if result == 1 && (gateway[0] != 0 || gateway[1] != 0 || gateway[2] != 0 || gateway[3] != 0) {
+                // Default route via gateway
+                print_str(b"0.0.0.0         ");
+                self.print_ip_padded(gateway, 16);
+                print_str(b"0.0.0.0         UG    0      0        0 eth0\n");
+                
+                // Local network route
+                let network = [
+                    ip[0] & netmask[0],
+                    ip[1] & netmask[1],
+                    ip[2] & netmask[2],
+                    ip[3] & netmask[3],
+                ];
+                self.print_ip_padded(network, 16);
+                print_str(b"0.0.0.0         ");
+                self.print_ip_padded(netmask, 16);
+                print_str(b"U     0      0        0 eth0\n");
+            }
+            
+            // Loopback
+            print_str(b"127.0.0.0       0.0.0.0         255.0.0.0       U     0      0        0 lo\n");
+        }
         self.last_exit_code = 0;
+    }
+    
+    fn cmd_nslookup_heap(&mut self, _args_buffer: &[u8], argc: usize) {
+        if argc < 2 {
+            print_str(b"usage: nslookup <hostname>\n");
+            self.last_exit_code = 1;
+            return;
+        }
+        
+        print_str(b"nslookup: DNS resolution not yet implemented in ShadeOS\n");
+        print_str(b"\nDNS feature is planned for a future release.\n");
+        print_str(b"For now, use IP addresses directly:\n");
+        print_str(b"  - Google DNS: 8.8.8.8, 8.8.4.4\n");
+        print_str(b"  - Cloudflare: 1.1.1.1, 1.0.0.1\n");
+        print_str(b"  - Quad9:      9.9.9.9\n");
+        print_str(b"\nExample: ping 8.8.8.8\n");
+        print_str(b"Example: httpget 142.250.185.46 /\n");
+        self.last_exit_code = 1;
+    }
+    
+    fn print_ip_padded(&self, ip: [u8; 4], width: usize) {
+        let mut buf = [b' '; 32];
+        let mut pos = 0;
+        
+        for i in 0..4 {
+            let num = ip[i];
+            if num >= 100 {
+                buf[pos] = b'0' + (num / 100);
+                pos += 1;
+                buf[pos] = b'0' + ((num / 10) % 10);
+                pos += 1;
+                buf[pos] = b'0' + (num % 10);
+                pos += 1;
+            } else if num >= 10 {
+                buf[pos] = b'0' + (num / 10);
+                pos += 1;
+                buf[pos] = b'0' + (num % 10);
+                pos += 1;
+            } else {
+                buf[pos] = b'0' + num;
+                pos += 1;
+            }
+            
+            if i < 3 {
+                buf[pos] = b'.';
+                pos += 1;
+            }
+        }
+        
+        // Pad to width
+        while pos < width {
+            buf[pos] = b' ';
+            pos += 1;
+        }
+        buf[pos] = 0;
+        
+        print_str(&buf[..pos+1]);
     }
     
     fn cmd_top(&mut self) {
