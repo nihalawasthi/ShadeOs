@@ -43,5 +43,5 @@
 /cmds
 ShadeOs.pem
 /iso/*
-vmx.txt
+vmware_serial.txt
 vmware/*
